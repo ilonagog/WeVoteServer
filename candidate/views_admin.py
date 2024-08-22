@@ -99,9 +99,14 @@ def candidates_sync_out_view(request):  # candidatesSyncOut
     if positive_value_exists(google_civic_election_id):
         candidate_list_manager = CandidateListManager()
         google_civic_election_id_list = [google_civic_election_id]
-        results = candidate_list_manager.retrieve_candidate_we_vote_id_list_from_election_list(
-            google_civic_election_id_list=google_civic_election_id_list,
-            limit_to_this_state_code=state_code)
+        # if state code is na, don't filter by state code of office link, get all candidates for that election
+        if positive_value_exists(state_code) and state_code.lower() == 'na':
+            results = candidate_list_manager.retrieve_candidate_we_vote_id_list_from_election_list(
+                google_civic_election_id_list=google_civic_election_id_list)
+        else:
+            results = candidate_list_manager.retrieve_candidate_we_vote_id_list_from_election_list(
+                google_civic_election_id_list=google_civic_election_id_list,
+                limit_to_this_state_code=state_code)
         candidate_we_vote_id_list = results['candidate_we_vote_id_list']
     elif positive_value_exists(state_code):
         current_year = get_current_year_as_integer()
@@ -116,6 +121,9 @@ def candidates_sync_out_view(request):  # candidatesSyncOut
         queryset = CandidateCampaign.objects.using('readonly').all()
         if positive_value_exists(google_civic_election_id):
             queryset = queryset.filter(we_vote_id__in=candidate_we_vote_id_list)
+            # with na state code, filter by candidate's state code from the previously fetched full election data
+            if positive_value_exists(state_code) and state_code.lower() == 'na':
+                queryset = queryset.filter(state_code__iexact=state_code)
         elif positive_value_exists(state_code):
             queryset = queryset.filter(state_code__iexact=state_code)
             queryset = queryset.filter(candidate_year=current_year)
@@ -901,9 +909,13 @@ def candidate_list_view(request):
             limit_to_this_state_code=state_code)
         candidate_we_vote_id_list = results['candidate_we_vote_id_list']
     elif google_civic_election_id_list_generated:
-        results = candidate_list_manager.retrieve_candidate_we_vote_id_list_from_election_list(
-            google_civic_election_id_list=google_civic_election_id_list,
-            limit_to_this_state_code=state_code)
+        if positive_value_exists(state_code) and state_code.lower() == 'na':
+            results = candidate_list_manager.retrieve_candidate_we_vote_id_list_from_election_list(
+                google_civic_election_id_list=google_civic_election_id_list)
+        else:
+            results = candidate_list_manager.retrieve_candidate_we_vote_id_list_from_election_list(
+                google_civic_election_id_list=google_civic_election_id_list,
+                limit_to_this_state_code=state_code)
         candidate_we_vote_id_list = results['candidate_we_vote_id_list']
 
     for one_state_code, one_state_name in state_list.items():
@@ -1573,7 +1585,7 @@ def candidate_new_search_view(request):
     if google_civic_election_id:
         # These are the Offices already entered for this election
         try:
-            office_queryset = ContestOffice.objects.order_by('office_name')
+            office_queryset = ContestOffice.objects.using('readonly').order_by('office_name')
             office_queryset = office_queryset.filter(google_civic_election_id=google_civic_election_id)
             contest_office_list = list(office_queryset)
 
@@ -1964,7 +1976,7 @@ def candidate_new_view(request):
     if not no_office:
         # These are the Offices already entered for this election
         try:
-            office_queryset = ContestOffice.objects.order_by('office_name')
+            office_queryset = ContestOffice.objects.using('readonly').order_by('office_name')
             office_queryset = office_queryset.filter(google_civic_election_id=google_civic_election_id)
             contest_office_list = list(office_queryset)
 
@@ -2263,7 +2275,7 @@ def candidate_edit_view(request, candidate_id=0, candidate_we_vote_id=""):
         if vote_smart_turned_on:
             try:
                 vote_smart_candidate_id = candidate_on_stage.vote_smart_id
-                rating_list_query = VoteSmartRatingOneCandidate.objects.order_by('-timeSpan')  # Desc order
+                rating_list_query = VoteSmartRatingOneCandidate.objects.using('readonly').order_by('-timeSpan')  # Desc order
                 rating_list = rating_list_query.filter(candidateId=vote_smart_candidate_id)
             except VotesmartApiError as error_instance:
                 # Catch the error message coming back from Vote Smart and pass it in the status
@@ -2279,10 +2291,10 @@ def candidate_edit_view(request, candidate_id=0, candidate_we_vote_id=""):
         if positive_value_exists(politician_we_vote_id):
             from politician.models import PoliticianSEOFriendlyPath
             try:
-                path_query = PoliticianSEOFriendlyPath.objects.all()
+                path_query = PoliticianSEOFriendlyPath.objects.using('readonly').all()
                 path_query = path_query.filter(politician_we_vote_id__iexact=politician_we_vote_id)
                 path_count = path_query.count()
-                path_list = list(path_query[:4])
+                path_list = list(path_query[:3])
             except Exception as e:
                 status += 'ERROR_RETRIEVING_FROM_PoliticianSEOFriendlyPath: ' + str(e) + ' '
 
@@ -2296,7 +2308,7 @@ def candidate_edit_view(request, candidate_id=0, candidate_we_vote_id=""):
 
         # Working with We Vote Positions
         try:
-            candidate_position_query = PositionEntered.objects.order_by('stance')
+            candidate_position_query = PositionEntered.objects.using('readonly').order_by('stance')
             # As of Aug 2018 we are no longer using PERCENT_RATING
             candidate_position_query = candidate_position_query.exclude(stance__iexact='PERCENT_RATING')
             candidate_position_query = candidate_position_query.filter(candidate_campaign_id=candidate_id)
@@ -2327,7 +2339,8 @@ def candidate_edit_view(request, candidate_id=0, candidate_we_vote_id=""):
 
         twitter_link_possibility_list = []
         try:
-            twitter_possibility_query = TwitterLinkPossibility.objects.order_by('not_a_match', '-likelihood_score')
+            twitter_possibility_query = TwitterLinkPossibility.objects.using('readonly')\
+                .order_by('not_a_match', '-likelihood_score')
             twitter_possibility_query = twitter_possibility_query.filter(
                 candidate_campaign_we_vote_id=candidate_on_stage.we_vote_id)
             if positive_value_exists(show_all_twitter_search_results):
@@ -2340,7 +2353,7 @@ def candidate_edit_view(request, candidate_id=0, candidate_we_vote_id=""):
         google_search_possibility_list = []
         google_search_possibility_total_count = 0
         try:
-            google_search_possibility_query = GoogleSearchUser.objects.filter(
+            google_search_possibility_query = GoogleSearchUser.objects.using('readonly').filter(
                 candidate_campaign_we_vote_id=candidate_on_stage.we_vote_id)
             google_search_possibility_query = google_search_possibility_query.filter(likelihood_score__gte=0)
             google_search_possibility_query = google_search_possibility_query.order_by(
@@ -2950,6 +2963,7 @@ def candidate_edit_process_view(request):
             election_day_as_integer = convert_we_vote_date_string_to_date_as_integer(this_election.election_day_text)
             if election_day_as_integer > latest_election_date:
                 candidate_ultimate_election_date = election_day_as_integer
+                latest_election_date = election_day_as_integer
                 election_day_as_string = str(election_day_as_integer)
                 year = election_day_as_string[:4]
                 if year and not positive_value_exists(candidate_year):
@@ -3380,7 +3394,13 @@ def candidate_edit_process_view(request):
                     messages.add_message(request, messages.ERROR,
                                          'Enter hex as \'#\' followed by six hexadecimal characters 0-9a-f')
             if state_code is not False:
-                candidate_on_stage.state_code = state_code
+                try:
+                    state_code_filtered = str(state_code)
+                    state_code_filtered = state_code_filtered[:2]
+                    candidate_on_stage.state_code = state_code_filtered
+                except Exception as e:
+                    state_code_filtered = None
+                    status += "PROBLEM_WITH_STATE_CODE: " + str(e) + " "
             if twitter_url is not False:
                 candidate_on_stage.twitter_url = twitter_url
 

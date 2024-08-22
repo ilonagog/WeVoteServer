@@ -970,9 +970,14 @@ class CandidateListManager(models.Manager):
             return results
 
         try:
-            results = self.retrieve_candidate_we_vote_id_list_from_election_list(
-                google_civic_election_id_list=google_civic_election_id_list,
-                limit_to_this_state_code=state_code)
+            if positive_value_exists(state_code) and state_code.lower() == 'na':
+                results = self.retrieve_candidate_we_vote_id_list_from_election_list(
+                    google_civic_election_id_list=google_civic_election_id_list)
+            else:
+                results = self.retrieve_candidate_we_vote_id_list_from_election_list(
+                    google_civic_election_id_list=google_civic_election_id_list,
+                    limit_to_this_state_code=state_code)
+
             if not positive_value_exists(results['success']):
                 candidate_count = 0
                 status += results['status']
@@ -2817,7 +2822,8 @@ class CandidateCampaign(models.Model):
         :return:
         """
         try:
-            office_list = ContestOffice.objects.filter(we_vote_id__in=self.contest_office_we_vote_id_list)
+            office_list = ContestOffice.objects.using('readonly')\
+                .filter(we_vote_id__in=self.contest_office_we_vote_id_list)
         except Exception as e:
             logger.error("CandidateCampaign.office_list no objects, we_vote_id: " +
                          str(self.we_vote_id) + " " + str(e))
@@ -2877,7 +2883,7 @@ class CandidateCampaign(models.Model):
 
     def generate_twitter_link(self):
         if self.candidate_twitter_handle:
-            return "https://twitter.com/{twitter_handle}".format(twitter_handle=self.candidate_twitter_handle)
+            return "https://x.com/{twitter_handle}".format(twitter_handle=self.candidate_twitter_handle)
         else:
             return ''
 

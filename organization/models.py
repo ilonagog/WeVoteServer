@@ -83,6 +83,7 @@ ORGANIZATION_WEBSITES_TO_EXCLUDE_FROM_SCRAPER = [
     'secure.actblue.com', 'secure.anedot.com', 'secure.ngpvan.com', 'secure.winred.com',
     't.co', 't.me', 'tinyurl.com', 'twitter.com',
     'wix.com', 'wixsite.com', 'wordpress.com', 'www.',
+    'x.com',
     'yahoo.com', 'youtube.com',
 ]
 
@@ -2654,7 +2655,7 @@ class OrganizationListManager(models.Manager):
                 # - organization.twitter_user_id
                 # - organization.organization_twitter_handle
                 try:
-                    organization_queryset = Organization.objects.all()
+                    organization_queryset = Organization.objects.all()  # Cannot be Readonly
 
                     # We want to find organizations with *any* of these values
                     new_filter = Q(twitter_user_id=twitter_user_id)
@@ -2995,7 +2996,7 @@ class OrganizationListManager(models.Manager):
 
         if positive_value_exists(organization_name):
             try:
-                organization_queryset = Organization.objects.all()
+                organization_queryset = Organization.objects.using('readonly').all()
                 organization_queryset = organization_queryset.filter(
                     organization_name__iexact=organization_name)
 
@@ -3560,7 +3561,7 @@ class Organization(models.Model):
 
     def generate_twitter_link(self):
         if self.organization_twitter_handle:
-            return "https://twitter.com/{twitter_handle}".format(twitter_handle=self.organization_twitter_handle)
+            return "https://x.com/{twitter_handle}".format(twitter_handle=self.organization_twitter_handle)
         else:
             return ''
 

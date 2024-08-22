@@ -523,7 +523,7 @@ def issue_organizations_retrieve_for_api(issue_we_vote_id=''):  # issueOrganizat
     organization_list_found = False
     from organization.models import Organization
     try:
-        organization_queryset = Organization.objects.all()
+        organization_queryset = Organization.objects.using('readonly').all()
         organization_queryset = organization_queryset.filter(we_vote_id__in=complete_organization_we_vote_id_list)
         organization_queryset = organization_queryset.order_by('-twitter_followers_count')
         organization_list = list(organization_queryset)
@@ -832,6 +832,9 @@ def issues_under_ballot_items_retrieve_for_api(  # issuesUnderBallotItemsRetriev
         return HttpResponse(json.dumps(json_data), content_type='application/json')
 
     for issue in issue_list:
+        # Exclude Political Party Issues due to speed concerns
+        if issue.we_vote_id in ['wv02issue94', 'wv02issue95', 'wv02issue96','wv02issue97']:
+            continue
         all_issue_we_vote_ids.append(issue.we_vote_id)
 
     if not positive_value_exists(google_civic_election_id):
@@ -1028,21 +1031,18 @@ def retrieve_issues_under_ballot_items_list(all_issue_we_vote_ids, google_civic_
     organization_we_vote_ids_for_all_issues = []
 
     cached_issue_we_vote_ids_under_each_organization = {}  # key organization_we_vote_id, value list issue_we_vote_ids
-    organizations_included_by_issue_list = {}  # key is issue_we_vote_id, value is list of organizations
     issue_we_vote_id_list_by_ballot_item_list = {}  # key is ballot_item_we_vote_id, value is list of issue_we_vote_ids
     oppose_issue_we_vote_id_list = {}  # key is ballot_item_we_vote_id, value is list of issue_we_vote_ids opposing
     support_issue_we_vote_id_list = {}  # key is ballot_item_we_vote_id, value is list of issue_we_vote_ids supporting
 
     organization_link_to_issue_list = OrganizationLinkToIssueList()
-    # By issue, return a list of organization_we_vote_ids tagged with that issue
-    for issue_we_vote_id in all_issue_we_vote_ids:
-        one_issue_list = [issue_we_vote_id]
-        organization_we_vote_id_list = \
-            organization_link_to_issue_list.fetch_organization_we_vote_id_list_by_issue_we_vote_id_list(one_issue_list)
-        organizations_included_by_issue_list[issue_we_vote_id] = organization_we_vote_id_list
-        for organization_we_vote_id in organization_we_vote_id_list:
-            if organization_we_vote_id not in organization_we_vote_ids_for_all_issues:
-                organization_we_vote_ids_for_all_issues.append(organization_we_vote_id)
+    # Return a list of organization_we_vote_ids
+    organization_we_vote_id_list = \
+        organization_link_to_issue_list.fetch_organization_we_vote_id_list_by_issue_we_vote_id_list(
+            all_issue_we_vote_ids)
+    for organization_we_vote_id in organization_we_vote_id_list:
+        if organization_we_vote_id not in organization_we_vote_ids_for_all_issues:
+            organization_we_vote_ids_for_all_issues.append(organization_we_vote_id)
 
     # Retrieve public positions for this election from every group linked to an issue the voter is following
     # (We sort them below)

@@ -382,6 +382,13 @@ class Issue(models.Model):
     we_vote_hosted_image_url_tiny = models.URLField(
         verbose_name='we vote hosted tiny image url', blank=True, null=True)
 
+    class Meta:
+        indexes = [
+            models.Index(
+                fields=['hide_issue', 'we_vote_id'],
+                name='hide_issue_we_vote_id'),
+        ]
+
     # We override the save function, so we can auto-generate we_vote_id
     def save(self, *args, **kwargs):
         # Even if this data came from another source we still need a unique we_vote_id
@@ -700,6 +707,16 @@ class OrganizationLinkToIssue(models.Model):
     def __unicode__(self):
         return self.issue_we_vote_id
 
+    class Meta:
+        indexes = [
+            models.Index(
+                fields=['organization_we_vote_id', 'link_active'],
+                name='organization_and_link_active'),
+            models.Index(
+                fields=['issue_we_vote_id', 'organization_we_vote_id', 'link_active'],
+                name='issue_org_link_active'),
+        ]
+
     def is_linked(self):
         if self.link_active:
             return True
@@ -841,8 +858,12 @@ class OrganizationLinkToIssueList(models.Manager):
         return number_of_organizations_following_this_issue
 
     @staticmethod
-    def retrieve_organization_we_vote_id_list_from_issue_we_vote_id_list(issue_we_vote_id_list):
+    def retrieve_organization_we_vote_id_list_from_issue_we_vote_id_list(
+            issue_we_vote_id_list=[],
+            retrieve_objects=False):
         success = True
+        organization_link_to_issue_list = []
+        organization_link_to_issue_list_found = False
         organization_we_vote_id_list = []
         organization_we_vote_id_list_found = False
         link_active = True
@@ -851,13 +872,21 @@ class OrganizationLinkToIssueList(models.Manager):
             # we decided not to use case-insensitivity in favour of '__in'
             link_queryset = link_queryset.filter(issue_we_vote_id__in=issue_we_vote_id_list)
             link_queryset = link_queryset.filter(link_active=link_active)
-            link_queryset = link_queryset.values_list('organization_we_vote_id', flat=True).distinct()
-            organization_we_vote_id_list = list(link_queryset)
-            if len(organization_we_vote_id_list):
-                organization_we_vote_id_list_found = True
-                status = 'ORGANIZATION_WE_VOTE_ID_LIST_RETRIEVED '
+            if positive_value_exists(retrieve_objects):
+                organization_link_to_issue_list = list(link_queryset)
+                if len(organization_link_to_issue_list):
+                    organization_link_to_issue_list_found = True
+                    status = 'ORGANIZATION_LINK_LIST_RETRIEVED '
+                else:
+                    status = 'NO_ORGANIZATION_LINK_LIST_RETRIEVED '
             else:
-                status = 'NO_ORGANIZATION_WE_VOTE_IDS_RETRIEVED '
+                link_queryset = link_queryset.values_list('organization_we_vote_id', flat=True).distinct()
+                organization_we_vote_id_list = list(link_queryset)
+                if len(organization_we_vote_id_list):
+                    organization_we_vote_id_list_found = True
+                    status = 'ORGANIZATION_WE_VOTE_ID_LIST_RETRIEVED '
+                else:
+                    status = 'NO_ORGANIZATION_WE_VOTE_IDS_RETRIEVED '
         except Issue.DoesNotExist:
             # No issues found. Not a problem.
             status = 'NO_ORGANIZATION_WE_VOTE_IDS_DO_NOT_EXIST '
@@ -871,6 +900,8 @@ class OrganizationLinkToIssueList(models.Manager):
         results = {
             'success': success,
             'status': status,
+            'organization_link_to_issue_list': organization_link_to_issue_list,
+            'organization_link_to_issue_list_found': organization_link_to_issue_list_found,
             'organization_we_vote_id_list_found': organization_we_vote_id_list_found,
             'organization_we_vote_id_list': organization_we_vote_id_list,
         }

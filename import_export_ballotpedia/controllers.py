@@ -618,7 +618,7 @@ def get_photo_url_from_ballotpedia(
         incoming_object.ballotpedia_page_url = ballotpedia_page_url
         incoming_object_changes = True
 
-    print(ballotpedia_page_url)
+    print("Get photo: " + ballotpedia_page_url)
     results = get_ballotpedia_photo_url_from_ballotpedia_candidate_url_page(ballotpedia_page_url)
     if results.get('success'):
         photo_url = results.get('photo_url')
@@ -646,6 +646,7 @@ def get_photo_url_from_ballotpedia(
             #     incoming_object.ballotpedia_photo_url_is_broken = True
             #     incoming_object.save()
         elif results.get('is_broken'):
+            status += "PAGE_BROKEN_OR_NEEDS_DISAMBIGUATION: " + str(ballotpedia_page_url) + " "
             if is_candidate or is_politician:
                 incoming_object_changes = True
                 incoming_object.ballotpedia_photo_url = None
@@ -690,9 +691,9 @@ def get_photo_url_from_ballotpedia(
         is_broken_photo = results.get('is_broken')
         is_placeholder_photo = results.get('is_silhouette')
         if is_placeholder_photo:
-            success = False
+            # success = False
             # status += results['status']
-            status += "IS_PLACEHOLDER_PHOTO "
+            status += "IS_BALLOTPEDIA_SILHOUETTE: " + photo_url + " "
             logger.info("Placeholder/Silhouette: " + photo_url)
             error_message_to_print += \
                 'Failed to retrieve Ballotpedia picture:  The Ballotpedia URL is for placeholder/Silhouette image.'
@@ -730,9 +731,13 @@ def get_photo_url_from_ballotpedia(
                         ballotpedia_photo_saved = True
                     else:
                         status += save_results['status']
+        elif is_broken_photo:
+            status += "BALLOTPEDIA_PHOTO_IS_BROKEN: " + ballotpedia_page_url + " "
+        else:
+            status += "BALLOTPEDIA_PHOTO_NOT_FOUND_NOR_SILHOUETTE: " + ballotpedia_page_url + " "
 
         if ballotpedia_photo_saved:
-            status += "SAVED_BALLOTPEDIA_IMAGE "
+            status += "SAVED_BALLOTPEDIA_IMAGE: " + ballotpedia_page_url + " "
             if is_candidate:
                 # Create a record denoting that we have retrieved from Ballotpedia for this candidate
                 save_results_history = remote_request_history_manager.create_remote_request_history_entry(
@@ -742,6 +747,7 @@ def get_photo_url_from_ballotpedia(
                     number_of_results=1,
                     status="CANDIDATE_BALLOTPEDIA_URL_PARSED_HTTP:" + ballotpedia_page_url)
         elif is_broken_photo or is_placeholder_photo:
+            # Status updated above
             pass
         else:
             success = False
@@ -873,7 +879,7 @@ def get_candidate_links_from_ballotpedia(
         incoming_object.ballotpedia_page_url = ballotpedia_page_url
         incoming_object_changes = True
 
-    print(ballotpedia_page_url)
+    print("Get links: " + ballotpedia_page_url)
     results = get_candidate_links_from_ballotpedia_candidate_url_page(ballotpedia_page_url)
     if results.get('success'):
         # In all situations, we want to mark this incoming_object as having been processed

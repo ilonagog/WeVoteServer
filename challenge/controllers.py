@@ -2,6 +2,7 @@
 # Brought to you by We Vote. Be good.
 # -*- coding: UTF-8 -*-
 
+from .controllers_participant import generate_challenge_participant_dict_from_challenge_participant_object
 from .models import Challenge, ChallengeListedByOrganization, ChallengeManager, ChallengeNewsItem, ChallengeOwner, \
     ChallengePolitician, ChallengeParticipant, CHALLENGE_UNIQUE_ATTRIBUTES_TO_BE_CLEARED, CHALLENGE_UNIQUE_IDENTIFIERS, \
     FINAL_ELECTION_DATE_COOL_DOWN
@@ -14,10 +15,6 @@ import json
 from io import BytesIO
 from PIL import Image, ImageOps
 import re
-# from activity.controllers import update_or_create_activity_notice_seed_for_challenge_participant_initial_response
-from candidate.models import CandidateCampaign
-from follow.models import FOLLOW_DISLIKE, FOLLOWING, FollowOrganization, FollowOrganizationManager
-from position.models import OPPOSE, SUPPORT
 from voter.models import Voter, VoterManager
 import wevote_functions.admin
 from wevote_functions.functions import positive_value_exists
@@ -39,6 +36,7 @@ CHALLENGE_ERROR_DICT = {
     'status': 'ERROR ',
     'success': False,
     'challenge_description': '',
+    'challenge_invite_text_default': '',
     'challenge_title': '',
     'challenge_news_item_list': [],
     'challenge_owner_list': [],
@@ -49,10 +47,10 @@ CHALLENGE_ERROR_DICT = {
     'final_election_date_as_integer': None,
     'final_election_date_in_past': False,
     'in_draft_mode': True,
+    'invitees_count': 0,
     'is_blocked_by_we_vote': False,
     'is_blocked_by_we_vote_reason': '',
     'is_participants_count_minimum_exceeded': False,
-    'latest_challenge_participant_endorsement_list': [],
     'latest_challenge_participant_list': [],
     'politician_we_vote_id': '',
     'opposers_count': 0,
@@ -377,11 +375,11 @@ def challenge_news_item_save_for_api(  # challengeNewsItemSave
         date_posted_string = ''
         date_sent_to_email_string = ''
         try:
-            date_last_changed_string = challenge_news_item.date_last_changed.strftime(DATE_FORMAT_YMD_HMS) # '%Y-%m-%d %H:%M:%S'
-            date_posted_string = challenge_news_item.date_posted.strftime(DATE_FORMAT_YMD_HMS) # '%Y-%m-%d %H:%M:%S'
-            date_sent_to_email_string = challenge_news_item.date_posted.strftime(DATE_FORMAT_YMD_HMS) # '%Y-%m-%d %H:%M:%S'
+            date_last_changed_string = challenge_news_item.date_last_changed.strftime(DATE_FORMAT_YMD_HMS)  # '%Y-%m-%d %H:%M:%S'
+            date_posted_string = challenge_news_item.date_posted.strftime(DATE_FORMAT_YMD_HMS)  # '%Y-%m-%d %H:%M:%S'
+            date_sent_to_email_string = challenge_news_item.date_posted.strftime(DATE_FORMAT_YMD_HMS)  # '%Y-%m-%d %H:%M:%S'
         except Exception as e:
-            status += "DATE_CONVERSION_ERROR: " + str(e) + " "
+            status += "DATE_CONVERSION_ERROR-NEWS_ITEM: " + str(e) + " "
         results = {
             'status':                       status,
             'success':                      success,
@@ -521,8 +519,11 @@ def challenge_retrieve_for_api(  # challengeRetrieve & challengeRetrieveAsOwner 
 def challenge_save_for_api(  # challengeSave & challengeStartSave
         challenge_description='',
         challenge_description_changed=False,
+        challenge_invite_text_default='',
+        challenge_invite_text_default_changed=False,
         in_draft_mode=False,
         in_draft_mode_changed=False,
+        is_start_save=False,
         challenge_photo_from_file_reader='',
         challenge_photo_changed=False,
         challenge_photo_delete=False,
@@ -539,6 +540,14 @@ def challenge_save_for_api(  # challengeSave & challengeStartSave
     status = ''
     success = True
     challenge_error_dict = copy.deepcopy(CHALLENGE_ERROR_DICT)
+    try:
+        challenge_description = challenge_description.strip()
+    except Exception as e:
+        pass
+    try:
+        challenge_title = challenge_title.strip()
+    except Exception as e:
+        pass
 
     voter_manager = VoterManager()
     voter_results = voter_manager.retrieve_voter_from_voter_device_id(voter_device_id, read_only=True)
@@ -593,36 +602,35 @@ def challenge_save_for_api(  # challengeSave & challengeStartSave
         viewer_is_owner = challenge_manager.is_voter_challenge_owner(
             challenge_we_vote_id=challenge_we_vote_id, voter_we_vote_id=voter_we_vote_id)
         if not positive_value_exists(viewer_is_owner):
+            if is_start_save:
+                # Get owner_list
+                results = challenge_manager.retrieve_challenge_as_owner(
+                    challenge_we_vote_id=challenge_we_vote_id,
+                    voter_we_vote_id=voter_we_vote_id,
+                    read_only=True,
+                )
+                challenge_owner_list = results['challenge_owner_list']
+                # If there isn't another owner, make this voter the owner
+                temporarily_true = True
+                if temporarily_true or len(challenge_owner_list) == 0:
+                    owner_results = challenge_manager.update_or_create_challenge_owner(
+                        challenge_we_vote_id=challenge_we_vote_id,
+                        organization_we_vote_id=linked_organization_we_vote_id,
+                        voter_we_vote_id=voter_we_vote_id)
+                    status += owner_results['status']
+                    viewer_is_owner = owner_results['challenge_owner_created'] or owner_results['challenge_owner_found']
+
+        if not positive_value_exists(viewer_is_owner):
             status += "VOTER_IS_NOT_OWNER_OF_CHALLENGE "
             results = challenge_error_dict
             results['status'] = status
             return results
-        # Save challenge_photo_from_file_reader and get back we_vote_hosted_challenge_photo_original_url
-        we_vote_hosted_challenge_photo_large_url = None
-        we_vote_hosted_challenge_photo_medium_url = None
-        we_vote_hosted_challenge_photo_original_url = None
-        we_vote_hosted_challenge_photo_small_url = None
-        if challenge_photo_changed and challenge_photo_from_file_reader:
-            photo_results = challenge_save_photo_from_file_reader(
-                challenge_we_vote_id=challenge_we_vote_id,
-                challenge_photo_from_file_reader=challenge_photo_from_file_reader)
-            if photo_results['we_vote_hosted_challenge_photo_original_url']:
-                we_vote_hosted_challenge_photo_original_url = \
-                    photo_results['we_vote_hosted_challenge_photo_original_url']
-                # Now we want to resize to a large version
-                create_resized_image_results = create_resized_images(
-                    challenge_we_vote_id=challenge_we_vote_id,
-                    challenge_photo_url_https=we_vote_hosted_challenge_photo_original_url)
-                we_vote_hosted_challenge_photo_large_url = \
-                    create_resized_image_results['cached_resized_image_url_large']
-                we_vote_hosted_challenge_photo_medium_url = \
-                    create_resized_image_results['cached_resized_image_url_medium']
-                we_vote_hosted_challenge_photo_small_url = \
-                    create_resized_image_results['cached_resized_image_url_tiny']
 
         update_values = {
             'challenge_description':                challenge_description,
             'challenge_description_changed':        challenge_description_changed,
+            'challenge_invite_text_default':    challenge_invite_text_default,
+            'challenge_invite_text_default_changed': challenge_invite_text_default_changed,
             'in_draft_mode':                        in_draft_mode,
             'in_draft_mode_changed':                in_draft_mode_changed,
             'challenge_photo_changed':              challenge_photo_changed,
@@ -633,11 +641,30 @@ def challenge_save_for_api(  # challengeSave & challengeStartSave
             'politician_delete_list_serialized':    politician_delete_list_serialized,
             'politician_starter_list_changed':      politician_starter_list_changed,
             'politician_starter_list_serialized':   politician_starter_list_serialized,
-            'we_vote_hosted_challenge_photo_large_url': we_vote_hosted_challenge_photo_large_url,
-            'we_vote_hosted_challenge_photo_medium_url': we_vote_hosted_challenge_photo_medium_url,
-            'we_vote_hosted_challenge_photo_small_url': we_vote_hosted_challenge_photo_small_url,
-            'we_vote_hosted_challenge_photo_original_url': we_vote_hosted_challenge_photo_original_url,
         }
+        # Save challenge_photo_from_file_reader and get back we_vote_hosted_challenge_photo_original_url
+        if challenge_photo_changed and challenge_photo_from_file_reader:
+            photo_results = challenge_save_photo_from_file_reader(
+                challenge_we_vote_id=challenge_we_vote_id,
+                challenge_photo_from_file_reader=challenge_photo_from_file_reader)
+            if photo_results['we_vote_hosted_challenge_photo_original_url']:
+                we_vote_hosted_challenge_photo_original_url = \
+                    photo_results['we_vote_hosted_challenge_photo_original_url']
+                # Now we want to resize to a large version
+                # Temp: Store as a campaignx photo
+                create_resized_image_results = create_resized_images(
+                    campaignx_we_vote_id=challenge_we_vote_id,
+                    campaignx_photo_url_https=we_vote_hosted_challenge_photo_original_url)
+                # create_resized_image_results = create_resized_images(
+                #     challenge_we_vote_id=challenge_we_vote_id,
+                #     challenge_photo_url_https=we_vote_hosted_challenge_photo_original_url)
+                update_values['we_vote_hosted_challenge_photo_large_url'] = \
+                    create_resized_image_results['cached_resized_image_url_large']
+                update_values['we_vote_hosted_challenge_photo_medium_url'] = \
+                    create_resized_image_results['cached_resized_image_url_medium']
+                update_values['we_vote_hosted_challenge_photo_small_url'] = \
+                    create_resized_image_results['cached_resized_image_url_tiny']
+
         create_results = challenge_manager.update_or_create_challenge(
             challenge_we_vote_id=challenge_we_vote_id,
             voter_we_vote_id=voter_we_vote_id,
@@ -651,6 +678,8 @@ def challenge_save_for_api(  # challengeSave & challengeStartSave
         update_values = {
             'challenge_description':                challenge_description,
             'challenge_description_changed':        challenge_description_changed,
+            'challenge_invite_text_default':        challenge_invite_text_default,
+            'challenge_invite_text_default_changed': challenge_invite_text_default_changed,
             'in_draft_mode':                        in_draft_mode,
             'in_draft_mode_changed':                in_draft_mode_changed,
             'challenge_photo_delete':               challenge_photo_delete,
@@ -724,16 +753,15 @@ def challenge_save_for_api(  # challengeSave & challengeStartSave
         )
 
         if in_draft_mode_changed and not positive_value_exists(in_draft_mode):
-            if voter.signed_in_with_email():
+            if voter.is_signed_in():
                 # Make sure the person creating the challenge has a challenge_participant entry IFF they are signed in
                 update_values = {
-                    'participant_endorsement': '',
-                    'participant_endorsement_changed': False,
                     'visible_to_public': True,
                     'visible_to_public_changed': True,
                 }
                 create_results = challenge_manager.update_or_create_challenge_participant(
                     challenge_we_vote_id=challenge_we_vote_id,
+                    voter=voter,
                     voter_we_vote_id=voter_we_vote_id,
                     organization_we_vote_id=linked_organization_we_vote_id,
                     update_values=update_values,
@@ -748,9 +776,10 @@ def challenge_save_for_api(  # challengeSave & challengeStartSave
 
         # We need to know all the politicians this voter can vote for so we can figure out
         #  if the voter can vote for any politicians in the election
-        from ballot.controllers import what_voter_can_vote_for
-        results = what_voter_can_vote_for(request=request, voter_device_id=voter_device_id)
-        voter_can_vote_for_politician_we_vote_ids = results['voter_can_vote_for_politician_we_vote_ids']
+        # from ballot.controllers import what_voter_can_vote_for
+        # results = what_voter_can_vote_for(request=request, voter_device_id=voter_device_id)
+        # voter_can_vote_for_politician_we_vote_ids = results['voter_can_vote_for_politician_we_vote_ids']
+        voter_can_vote_for_politician_we_vote_ids = []
 
         generate_results = generate_challenge_dict_from_challenge_object(
             challenge=challenge,
@@ -861,287 +890,6 @@ def challenge_save_photo_from_file_reader(
     return results
 
 
-def challenge_participant_retrieve_for_api(  # challengeParticipantRetrieve
-        voter_device_id='',
-        challenge_we_vote_id=''):
-    status = ''
-    voter_signed_in_with_email = False
-
-    voter_manager = VoterManager()
-    voter_results = voter_manager.retrieve_voter_from_voter_device_id(voter_device_id, read_only=True)
-    if voter_results['voter_found']:
-        voter = voter_results['voter']
-        voter_signed_in_with_email = voter.signed_in_with_email()
-        voter_we_vote_id = voter.we_vote_id
-    else:
-        status += "VALID_VOTER_ID_MISSING "
-        results = {
-            'status':                       status,
-            'success':                      False,
-            'challenge_we_vote_id':         '',
-            'date_last_changed':            '',
-            'date_joined':                  '',
-            'organization_we_vote_id':      '',
-            'participant_name':             '',
-            'visible_to_public':            True,
-            'voter_we_vote_id':             '',
-            'voter_signed_in_with_email':   voter_signed_in_with_email,
-            'we_vote_hosted_profile_photo_image_url_medium': '',
-            'we_vote_hosted_profile_photo_image_url_tiny': '',
-        }
-        return results
-
-    challenge_manager = ChallengeManager()
-    results = challenge_manager.retrieve_challenge_participant(
-        challenge_we_vote_id=challenge_we_vote_id,
-        voter_we_vote_id=voter_we_vote_id,
-        read_only=True,
-    )
-    status += results['status']
-    if not results['success']:
-        status += "CHALLENGE_PARTICIPANT_RETRIEVE_ERROR "
-        results = {
-            'status':                       status,
-            'success':                      False,
-            'challenge_we_vote_id':         '',
-            'date_last_changed':            '',
-            'date_joined':                  '',
-            'organization_we_vote_id':      '',
-            'participant_endorsement':      '',
-            'participant_name':             '',
-            'visible_to_public':            True,
-            'voter_we_vote_id':             '',
-            'voter_signed_in_with_email':   voter_signed_in_with_email,
-            'we_vote_hosted_profile_photo_image_url_tiny': '',
-        }
-        return results
-    elif not results['challenge_participant_found']:
-        status += "CHALLENGE_PARTICIPANT_NOT_FOUND: "
-        status += results['status'] + " "
-        results = {
-            'status':                       status,
-            'success':                      False,
-            'challenge_we_vote_id':         '',
-            'date_last_changed':            '',
-            'date_joined':                  '',
-            'organization_we_vote_id':      '',
-            'participant_endorsement':      '',
-            'participant_name':             '',
-            'visible_to_public':            True,
-            'voter_we_vote_id':             '',
-            'voter_signed_in_with_email':   voter_signed_in_with_email,
-            'we_vote_hosted_profile_photo_image_url_tiny': '',
-        }
-        return results
-
-    challenge_participant = results['challenge_participant']
-    date_last_changed_string = ''
-    date_joined_string = ''
-    try:
-        date_last_changed_string = challenge_participant.date_last_changed.strftime(DATE_FORMAT_YMD_HMS) # '%Y-%m-%d %H:%M:%S'
-        date_joined_string = challenge_participant.date_joined.strftime(DATE_FORMAT_YMD_HMS) # '%Y-%m-%d %H:%M:%S'
-    except Exception as e:
-        status += "DATE_CONVERSION_ERROR: " + str(e) + " "
-    results = {
-        'status':                       status,
-        'success':                      True,
-        'challenge_we_vote_id':         challenge_participant.challenge_we_vote_id,
-        'date_last_changed':            date_last_changed_string,
-        'date_joined':                  date_joined_string,
-        'organization_we_vote_id':      challenge_participant.organization_we_vote_id,
-        'participant_name':             challenge_participant.participant_name,
-        'visible_to_public':            challenge_participant.visible_to_public,
-        'voter_we_vote_id':             challenge_participant.voter_we_vote_id,
-        'voter_signed_in_with_email':   voter_signed_in_with_email,
-        'we_vote_hosted_profile_photo_image_url_medium': challenge_participant.we_vote_hosted_profile_image_url_medium,
-        'we_vote_hosted_profile_photo_image_url_tiny': challenge_participant.we_vote_hosted_profile_image_url_tiny,
-    }
-    return results
-
-
-def challenge_participant_save_for_api(  # challengeParticipantSave
-        challenge_we_vote_id='',
-        visible_to_public=False,
-        visible_to_public_changed=False,
-        voter_device_id=''):
-    status = ''
-    success = True
-    voter_signed_in_with_email = False
-
-    error_results = {
-        'status': status,
-        'success': False,
-        'challenge_we_vote_id': '',
-        'date_last_changed': '',
-        'date_joined': '',
-        'id': '',
-        'organization_we_vote_id': '',
-        'participant_name': '',
-        'visible_to_public': True,
-        'voter_we_vote_id': '',
-        'voter_signed_in_with_email': voter_signed_in_with_email,
-        'we_vote_hosted_profile_photo_image_url_tiny': '',
-    }
-
-    voter_manager = VoterManager()
-    voter_results = voter_manager.retrieve_voter_from_voter_device_id(voter_device_id, read_only=True)
-    if voter_results['voter_found']:
-        voter = voter_results['voter']
-        voter_signed_in_with_email = voter.signed_in_with_email()
-        voter_we_vote_id = voter.we_vote_id
-        linked_organization_we_vote_id = voter.linked_organization_we_vote_id
-    else:
-        status += "VALID_VOTER_ID_MISSING "
-        results = error_results
-        results['status'] = status
-        return results
-    # To participate in a challenge, voter must be signed in
-    if not voter.is_signed_in():
-        status += "PARTICIPANT_NOT_SIGNED_IN "
-        results = error_results
-        results['status'] = status
-        return results
-
-    if not positive_value_exists(challenge_we_vote_id):
-        status += "CHALLENGE_WE_VOTE_ID_REQUIRED "
-        results = error_results
-        results['status'] = status
-        return results
-
-    challenge_manager = ChallengeManager()
-    update_values = {
-        'visible_to_public':                visible_to_public,
-        'visible_to_public_changed':        visible_to_public_changed,
-    }
-    create_results = challenge_manager.update_or_create_challenge_participant(
-        challenge_we_vote_id=challenge_we_vote_id,
-        voter_we_vote_id=voter_we_vote_id,
-        organization_we_vote_id=linked_organization_we_vote_id,
-        update_values=update_values,
-    )
-
-    if create_results['challenge_participant_found']:
-        challenge_participant = create_results['challenge_participant']
-
-        results = challenge_manager.retrieve_challenge(
-            challenge_we_vote_id=challenge_we_vote_id,
-            read_only=True,
-        )
-        notice_seed_statement_text = ''
-        if results['challenge_found']:
-            challenge = results['challenge']
-            notice_seed_statement_text = challenge.challenge_title
-
-        # TODO
-        # activity_results = update_or_create_activity_notice_seed_for_challenge_participant_initial_response(
-        #     challenge_we_vote_id=challenge_participant.challenge_we_vote_id,
-        #     visibility_is_public=challenge_participant.visible_to_public,
-        #     speaker_name=challenge_participant.participant_name,
-        #     speaker_organization_we_vote_id=challenge_participant.organization_we_vote_id,
-        #     speaker_voter_we_vote_id=challenge_participant.voter_we_vote_id,
-        #     speaker_profile_image_url_medium=voter.we_vote_hosted_profile_image_url_medium,
-        #     speaker_profile_image_url_tiny=voter.we_vote_hosted_profile_image_url_tiny,
-        #     statement_text=notice_seed_statement_text)
-        # status += activity_results['status']
-
-    status += create_results['status']
-    if create_results['challenge_participant_found']:
-        count_results = challenge_manager.update_challenge_participants_count(challenge_we_vote_id)
-
-        challenge_participant = create_results['challenge_participant']
-        date_last_changed_string = ''
-        date_joined_string = ''
-        try:
-            date_last_changed_string = challenge_participant.date_last_changed.strftime(DATE_FORMAT_YMD_HMS) # '%Y-%m-%d %H:%M:%S'
-            date_joined_string = challenge_participant.date_joined.strftime(DATE_FORMAT_YMD_HMS) # '%Y-%m-%d %H:%M:%S'
-        except Exception as e:
-            status += "DATE_CONVERSION_ERROR: " + str(e) + " "
-        results = {
-            'status':                       status,
-            'success':                      success,
-            'challenge_we_vote_id':         challenge_participant.challenge_we_vote_id,
-            'date_last_changed':            date_last_changed_string,
-            'date_joined':                  date_joined_string,
-            'id':                           challenge_participant.id,
-            'organization_we_vote_id':      challenge_participant.organization_we_vote_id,
-            'participant_name':             challenge_participant.participant_name,
-            'visible_to_public':            challenge_participant.visible_to_public,
-            'voter_we_vote_id':             challenge_participant.voter_we_vote_id,
-            'voter_signed_in_with_email':   voter_signed_in_with_email,
-            'we_vote_hosted_profile_photo_image_url_medium':
-                challenge_participant.we_vote_hosted_profile_image_url_medium,
-            'we_vote_hosted_profile_photo_image_url_tiny': challenge_participant.we_vote_hosted_profile_image_url_tiny,
-        }
-        return results
-    else:
-        status += "CHALLENGE_PARTICIPANT_SAVE_ERROR "
-        results = error_results
-        results['status'] = status
-        return results
-
-
-def refresh_challenge_participants_count_for_challenge_we_vote_id_list(challenge_we_vote_id_list=[]):
-    error_message_to_print = ''
-    status = ''
-    success = True
-    update_message = ''
-    challenges_need_to_be_updated = False
-    challenge_manager = ChallengeManager()
-    challenge_bulk_update_list = []
-    challenge_updates_made = 0
-    if len(challenge_we_vote_id_list) > 0:
-        follow_organization_manager = FollowOrganizationManager()
-        queryset = Challenge.objects.all()  # Cannot be readonly because of bulk_update below
-        queryset = queryset.filter(we_vote_id__in=challenge_we_vote_id_list)
-        challenge_list = list(queryset)
-        for one_challenge in challenge_list:
-            changes_found = False
-            opposers_count = 0
-            if positive_value_exists(one_challenge.politician_we_vote_id):
-                if positive_value_exists(one_challenge.organization_we_vote_id):
-                    opposers_count = follow_organization_manager.fetch_follow_organization_count(
-                        following_status=FOLLOW_DISLIKE,
-                        organization_we_vote_id_being_followed=one_challenge.organization_we_vote_id)
-
-                    participants_count = follow_organization_manager.fetch_follow_organization_count(
-                        following_status=FOLLOWING,
-                        organization_we_vote_id_being_followed=one_challenge.organization_we_vote_id)
-                else:
-                    error_message_to_print += "CHALLENGE_MISSING_ORGANIZATION: " + str(one_challenge.we_vote_id) + " "
-                    continue
-            else:
-                participants_count = challenge_manager.fetch_challenge_participant_count(
-                    challenge_we_vote_id=one_challenge.we_vote_id)
-            if opposers_count != one_challenge.opposers_count:
-                one_challenge.opposers_count = opposers_count
-                changes_found = True
-            if participants_count != one_challenge.participants_count:
-                one_challenge.participants_count = participants_count
-                changes_found = True
-            if changes_found:
-                challenge_bulk_update_list.append(one_challenge)
-                challenges_need_to_be_updated = True
-                challenge_updates_made += 1
-    if challenges_need_to_be_updated:
-        try:
-            Challenge.objects.bulk_update(challenge_bulk_update_list, ['opposers_count', 'participants_count'])
-            update_message += \
-                "{challenge_updates_made:,} Challenge entries updated with fresh participants_count, " \
-                "".format(challenge_updates_made=challenge_updates_made)
-        except Exception as e:
-            status += "ERROR with Challenge.objects.bulk_update: {e}, ".format(e=e)
-            error_message_to_print += "ERROR with Challenge.objects.bulk_update: {e}, ".format(e=e)
-            success = False
-
-    results = {
-        'error_message_to_print':   error_message_to_print,
-        'status':                   status,
-        'success':                  success,
-        'update_message':           update_message,
-    }
-    return results
-
-
 def fetch_duplicate_challenge_count(
         challenge=None,
         ignore_challenge_we_vote_id_list=[],
@@ -1221,7 +969,7 @@ def figure_out_challenge_conflict_values(challenge1, challenge2):
                         challenge_merge_conflict_values[attribute] = 'MATCHING'
                     else:
                         challenge_merge_conflict_values[attribute] = 'CONFLICT'
-                elif attribute == "date_challenge_started":
+                elif attribute == "challenge_ends_date_as_integer":
                     # Choose the earlier date
                     if challenge2_attribute_value < challenge1_attribute_value:
                         challenge_merge_conflict_values[attribute] = 'CHALLENGE2'
@@ -1454,12 +1202,12 @@ def generate_challenge_dict_from_challenge_object(
                 date_posted_string = ''
                 date_sent_to_email_string = ''
                 try:
-                    date_last_changed_string = news_item.date_last_changed.strftime(DATE_FORMAT_YMD_HMS) # '%Y-%m-%d %H:%M:%S'
-                    date_posted_string = news_item.date_posted.strftime(DATE_FORMAT_YMD_HMS) # '%Y-%m-%d %H:%M:%S'
+                    date_last_changed_string = news_item.date_last_changed.strftime(DATE_FORMAT_YMD_HMS)  # '%Y-%m-%d %H:%M:%S'
+                    date_posted_string = news_item.date_posted.strftime(DATE_FORMAT_YMD_HMS)  # '%Y-%m-%d %H:%M:%S'
                     if positive_value_exists(news_item.date_sent_to_email):
-                        date_sent_to_email_string = news_item.date_sent_to_email.strftime(DATE_FORMAT_YMD_HMS) # '%Y-%m-%d %H:%M:%S'
+                        date_sent_to_email_string = news_item.date_sent_to_email.strftime(DATE_FORMAT_YMD_HMS)  # '%Y-%m-%d %H:%M:%S'
                 except Exception as e:
-                    status += "DATE_CONVERSION_ERROR: " + str(e) + " "
+                    status += "DATE_CONVERSION_ERROR-CHALLENGE: " + str(e) + " "
                 one_news_item_dict = {
                     'challenge_news_subject': news_item.challenge_news_subject,
                     'challenge_news_text': news_item.challenge_news_text,
@@ -1527,108 +1275,40 @@ def generate_challenge_dict_from_challenge_object(
             challenge_we_vote_id=challenge.we_vote_id,
         )
 
-    latest_challenge_participant_endorsement_list = []  # Latest participants with comments
     latest_challenge_participant_list = []  # Latest participants with or without comments
     latest_position_dict_list = []  # DALE 2024-07-06 I don't know if we want to bring this in here
     participants_count_next_goal = 0
     voter_challenge_participant_dict = {}
-    # Only retrieve news items if NOT linked to a politician
-    if challenge and positive_value_exists(challenge.politician_we_vote_id):
-        # If linked to a politician, retrieve positions instead of challenge_participants
-        pass
-    elif challenge and not positive_value_exists(challenge.politician_we_vote_id):
-        # If NOT linked to a politician, retrieve challenge_participants instead of positions
-        participant_results = challenge_manager.retrieve_challenge_participant(
-            challenge_we_vote_id=challenge.we_vote_id,
-            voter_we_vote_id=voter_we_vote_id,
-            read_only=True)
-        if participant_results['success'] and participant_results['challenge_participant_found']:
-            challenge_participant = participant_results['challenge_participant']
-            chip_in_total = 'none'
-            date_last_changed_string = ''
-            date_joined_string = ''
-            try:
-                date_last_changed_string = challenge_participant.date_last_changed.strftime(DATE_FORMAT_YMD_HMS) # '%Y-%m-%d %H:%M:%S'
-                date_joined_string = challenge_participant.date_joined.strftime(DATE_FORMAT_YMD_HMS) # '%Y-%m-%d %H:%M:%S'
-            except Exception as e:
-                status += "DATE_CONVERSION_ERROR: " + str(e) + " "
-            try:
-                from stripe_donations.models import StripeManager
-                chip_in_total = StripeManager.retrieve_chip_in_total(voter_we_vote_id, challenge.we_vote_id)
-            except Exception as e:
-                status += "RETRIEVE_CHIP_IN_TOTAL_ERROR: " + str(e) + " "
+    participant_results = challenge_manager.retrieve_challenge_participant(
+        challenge_we_vote_id=challenge.we_vote_id,
+        voter_we_vote_id=voter_we_vote_id,
+        read_only=True)
+    if participant_results['success'] and participant_results['challenge_participant_found']:
+        challenge_participant = participant_results['challenge_participant']
+        generate_results = generate_challenge_participant_dict_from_challenge_participant_object(
+            challenge_participant=challenge_participant)
+        if generate_results['success']:
+            voter_challenge_participant_dict = generate_results['challenge_participant_dict']
 
-            voter_challenge_participant_dict = {
-                'challenge_we_vote_id':         challenge_participant.challenge_we_vote_id,
-                'chip_in_total':                chip_in_total,
-                'date_last_changed':            date_last_changed_string,
-                'date_joined':                  date_joined_string,
-                'id':                           challenge_participant.id,
-                'organization_we_vote_id':      challenge_participant.organization_we_vote_id,
-                'participant_name':             challenge_participant.participant_name,
-                'visible_to_public':            challenge_participant.visible_to_public,
-                'voter_we_vote_id':             challenge_participant.voter_we_vote_id,
-                'voter_signed_in_with_email':   voter_signed_in_with_email,
-                'we_vote_hosted_profile_image_url_medium': challenge_participant.we_vote_hosted_profile_image_url_medium,
-                'we_vote_hosted_profile_image_url_tiny': challenge_participant.we_vote_hosted_profile_image_url_tiny,
-            }
-
-        # Get most recent participants, regardless of whether there is a written endorsement.
-        participant_list_results = challenge_manager.retrieve_challenge_participant_list(
-            challenge_we_vote_id=challenge.we_vote_id,
-            limit=7,
-            read_only=True,
-            require_participant_endorsement=False,
-            require_visible_to_public=True)
-        if participant_list_results['participant_list_found']:
-            participant_list = participant_list_results['participant_list']
-            for challenge_participant in participant_list:
-                date_joined_string = ''
-                try:
-                    date_joined_string = challenge_participant.date_joined.strftime(DATE_FORMAT_YMD_HMS) # '%Y-%m-%d %H:%M:%S'
-                except Exception as e:
-                    status += "DATE_CONVERSION_ERROR: " + str(e) + " "
-                one_participant_dict = {
-                    'id': challenge_participant.id,
-                    'challenge_we_vote_id': challenge_participant.challenge_we_vote_id,
-                    'date_joined': date_joined_string,
-                    'organization_we_vote_id': challenge_participant.organization_we_vote_id,
-                    'participant_name': challenge_participant.participant_name,
-                    'voter_we_vote_id': challenge_participant.voter_we_vote_id,
-                    'we_vote_hosted_profile_image_url_medium': challenge_participant.we_vote_hosted_profile_image_url_medium,
-                    'we_vote_hosted_profile_image_url_tiny': challenge_participant.we_vote_hosted_profile_image_url_tiny,
-                }
+    # Get most recent participants
+    participant_list_results = challenge_manager.retrieve_challenge_participant_list(
+        challenge_we_vote_id=challenge.we_vote_id,
+        limit=7,
+        read_only=True,
+        require_invite_text_for_friends=False,
+        require_visible_to_public=True)
+    if participant_list_results['participant_list_found']:
+        participant_list = participant_list_results['participant_list']
+        for challenge_participant in participant_list:
+            generate_results = generate_challenge_participant_dict_from_challenge_participant_object(
+                challenge_participant=challenge_participant)
+            if generate_results['success']:
+                one_participant_dict = generate_results['challenge_participant_dict']
                 latest_challenge_participant_list.append(one_participant_dict)
 
-        # Get most recent participant_endorsements which include written endorsement
-        # (require_participant_endorsement == True)
-        participant_list_results = challenge_manager.retrieve_challenge_participant_list(
-            challenge_we_vote_id=challenge.we_vote_id,
-            limit=10,
-            read_only=True,
-            require_participant_endorsement=True)
-        if participant_list_results['participant_list_found']:
-            participant_list = participant_list_results['participant_list']
-            for challenge_participant in participant_list:
-                date_joined_string = ''
-                try:
-                    date_joined_string = challenge_participant.date_joined.strftime(DATE_FORMAT_YMD_HMS) # '%Y-%m-%d %H:%M:%S'
-                except Exception as e:
-                    status += "DATE_CONVERSION_ERROR: " + str(e) + " "
-                one_participant_dict = {
-                    'id': challenge_participant.id,
-                    'challenge_we_vote_id': challenge_participant.challenge_we_vote_id,
-                    'date_joined': date_joined_string,
-                    'organization_we_vote_id': challenge_participant.organization_we_vote_id,
-                    'participant_name': challenge_participant.participant_name,
-                    'voter_we_vote_id': challenge_participant.voter_we_vote_id,
-                    'we_vote_hosted_profile_image_url_medium': challenge_participant.we_vote_hosted_profile_image_url_medium,
-                    'we_vote_hosted_profile_image_url_tiny': challenge_participant.we_vote_hosted_profile_image_url_tiny,
-                }
-                latest_challenge_participant_endorsement_list.append(one_participant_dict)
-        participants_count_next_goal = challenge_manager.fetch_participants_count_next_goal(
-            participants_count=challenge.participants_count,
-            participants_count_victory_goal=challenge.participants_count_victory_goal)
+    participants_count_next_goal = challenge_manager.fetch_participants_count_next_goal(
+        participants_count=challenge.participants_count,
+        participants_count_victory_goal=challenge.participants_count_victory_goal)
 
     if voter_can_send_updates_challenge_we_vote_ids is not None:
         # Leave it as is, even if empty
@@ -1655,14 +1335,34 @@ def generate_challenge_dict_from_challenge_object(
         final_election_date_plus_cool_down >= challenge.final_election_date_as_integer \
         if positive_value_exists(challenge.final_election_date_as_integer) else False
 
+    if positive_value_exists(challenge.challenge_description):
+        challenge_description = challenge.challenge_description.strip()
+    else:
+        challenge_description = ''
+    if positive_value_exists(challenge.challenge_title):
+        challenge_title = challenge.challenge_title.strip()
+    else:
+        challenge_title = ""
+
     if hasattr(challenge, 'visible_on_this_site'):
         visible_on_this_site = challenge.visible_on_this_site
     else:
         visible_on_this_site = True
 
+    if positive_value_exists(challenge.challenge_invite_text_default):
+        challenge_invite_text_default = challenge.challenge_invite_text_default
+    else:
+        from challenge.models import CHALLENGE_INVITE_TEXT_DEFAULT
+        challenge_invite_text_default = CHALLENGE_INVITE_TEXT_DEFAULT
+        challenge_invite_text_default = \
+            challenge_invite_text_default.replace('[challenge_title]', challenge_title)
+
     challenge_dict = {
-        'challenge_description':            challenge.challenge_description,
-        'challenge_title':                  challenge.challenge_title,
+        'challenge_description':            challenge_description,
+        'challenge_invite_text_default':    challenge_invite_text_default,
+        'challenge_ends_date_as_integer':   challenge.challenge_ends_date_as_integer,
+        'challenge_starts_date_as_integer': challenge.challenge_starts_date_as_integer,
+        'challenge_title':                  challenge_title,
         'challenge_news_item_list':         challenge_news_item_list,
         'challenge_owner_list':             challenge_owner_list,
         'challenge_politician_list':        challenge_politician_list_modified,
@@ -1672,28 +1372,27 @@ def generate_challenge_dict_from_challenge_object(
         'final_election_date_as_integer':   challenge.final_election_date_as_integer,
         'final_election_date_in_past':      final_election_date_in_past,
         'in_draft_mode':                    challenge.in_draft_mode,
+        'invitees_count':                   challenge.invitees_count,
         'is_blocked_by_we_vote':            challenge.is_blocked_by_we_vote,
         'is_blocked_by_we_vote_reason':     challenge.is_blocked_by_we_vote_reason,
         'is_participants_count_minimum_exceeded': challenge.is_participants_count_minimum_exceeded(),
-        'latest_challenge_participant_endorsement_list':  latest_challenge_participant_endorsement_list,
         'latest_challenge_participant_list':  latest_challenge_participant_list,
-        'politician_we_vote_id':            challenge.politician_we_vote_id,
-        'opposers_count':                   challenge.opposers_count,
         'order_in_list':                    order_in_list,
+        'participants_count':               challenge.participants_count,
+        'participants_count_next_goal':     participants_count_next_goal,
+        'participants_count_victory_goal':  challenge.participants_count_victory_goal,
+        'politician_we_vote_id':            challenge.politician_we_vote_id,
         'profile_image_background_color':   challenge.profile_image_background_color,
         'seo_friendly_path':                challenge.seo_friendly_path,
         'seo_friendly_path_list':           seo_friendly_path_list,
-        'participants_count':                 challenge.participants_count,
-        'participants_count_next_goal':       participants_count_next_goal,
-        'participants_count_victory_goal':    challenge.participants_count_victory_goal,
         'visible_on_this_site':             visible_on_this_site,
-        'voter_challenge_participant':        voter_challenge_participant_dict,
+        'voter_challenge_participant':      voter_challenge_participant_dict,
         'voter_can_send_updates_to_challenge':
             challenge.we_vote_id in voter_can_send_updates_challenge_we_vote_ids,
         'voter_can_vote_for_politician_we_vote_ids': voter_can_vote_for_politician_we_vote_ids,
         'voter_is_challenge_owner':         voter_is_challenge_owner,
         'voter_signed_in_with_email':       voter_signed_in_with_email,
-        'we_vote_hosted_challenge_photo_large_url':  challenge.we_vote_hosted_challenge_photo_large_url,
+        'we_vote_hosted_challenge_photo_large_url': challenge.we_vote_hosted_challenge_photo_large_url,
         'we_vote_hosted_challenge_photo_medium_url': we_vote_hosted_challenge_photo_medium_url,
         'we_vote_hosted_challenge_photo_small_url': we_vote_hosted_challenge_photo_small_url,
         'we_vote_hosted_profile_image_url_large': challenge.we_vote_hosted_profile_image_url_large,
@@ -2011,8 +1710,8 @@ def merge_these_two_challenges(
     challenge2_participants_to_delete_list = []
     queryset = ChallengeParticipant.objects.all()
     queryset = queryset.filter(challenge_we_vote_id=challenge1_we_vote_id)
-    challenge1_participants_list = list(queryset)
-    for challenge1_participant in challenge1_participants_list:
+    challenge1_participant_list = list(queryset)
+    for challenge1_participant in challenge1_participant_list:
         if positive_value_exists(challenge1_participant.organization_we_vote_id) and \
                 challenge1_participant.organization_we_vote_id not in challenge1_organization_we_vote_id_list:
             challenge1_organization_we_vote_id_list.append(challenge1_participant.organization_we_vote_id)
@@ -2022,8 +1721,8 @@ def merge_these_two_challenges(
 
     queryset = ChallengeParticipant.objects.all()
     queryset = queryset.filter(challenge_we_vote_id=challenge2_we_vote_id)
-    challenge2_participants_list = list(queryset)
-    for challenge2_participant in challenge2_participants_list:
+    challenge2_participant_list = list(queryset)
+    for challenge2_participant in challenge2_participant_list:
         # Is this challenge politician already in Challenge 1?
         challenge2_participant_matches_challenge1_participant = False
         if positive_value_exists(challenge2_participant.organization_we_vote_id) and \
@@ -2075,171 +1774,161 @@ def merge_these_two_challenges(
     return results
 
 
-def move_challenge_to_another_organization(
-        from_organization_we_vote_id, to_organization_we_vote_id,
-        to_organization_name=None):
+# def move_challenge_to_another_organization(
+#         from_organization_we_vote_id, to_organization_we_vote_id,
+#         to_organization_name=None):
+#     status = ''
+#     success = True
+#     challenges_moved = 0
+#     challenge_listed_entries_moved = 0
+#     challenge_news_item_entries_moved = 0
+#     challenge_owner_entries_moved = 0
+#     challenge_participant_entries_moved = 0
+#
+#     if not positive_value_exists(from_organization_we_vote_id) or not positive_value_exists(to_organization_we_vote_id):
+#         status += "MOVE_CHALLENGE_TO_ORG-MISSING_EITHER_FROM_OR_TO_ORG_WE_VOTE_ID "
+#         success = False
+#         results = {
+#             'status':                           status,
+#             'success':                          success,
+#             'from_organization_we_vote_id':     from_organization_we_vote_id,
+#             'to_organization_we_vote_id':       to_organization_we_vote_id,
+#             'challenges_moved':                 challenges_moved,
+#             'challenge_owner_entries_moved':    challenge_owner_entries_moved,
+#         }
+#         return results
+#
+#     if from_organization_we_vote_id == to_organization_we_vote_id:
+#         status += "MOVE_CHALLENGE_TO_ORG-FROM_AND_TO_ORG_WE_VOTE_IDS_IDENTICAL "
+#         success = False
+#         results = {
+#             'status':                           status,
+#             'success':                          success,
+#             'from_organization_we_vote_id':     from_organization_we_vote_id,
+#             'to_organization_we_vote_id':       to_organization_we_vote_id,
+#             'challenges_moved':                 challenges_moved,
+#             'challenge_owner_entries_moved':    challenge_owner_entries_moved,
+#         }
+#         return results
+#
+#     # #############################################
+#     # Move based on organization_we_vote_id
+#     if positive_value_exists(to_organization_name):
+#         try:
+#             challenge_owner_entries_moved += ChallengeOwner.objects \
+#                 .filter(organization_we_vote_id=from_organization_we_vote_id) \
+#                 .update(organization_name=to_organization_name,
+#                         organization_we_vote_id=to_organization_we_vote_id)
+#         except Exception as e:
+#             status += "FAILED-CHALLENGE_TO_ORG_OWNER_UPDATE-FROM_ORG_WE_VOTE_ID-WITH_NAME: " + str(e) + " "
+#         try:
+#             challenge_participant_entries_moved += ChallengeParticipant.objects \
+#                 .filter(organization_we_vote_id=from_organization_we_vote_id) \
+#                 .update(participant_name=to_organization_name,
+#                         organization_we_vote_id=to_organization_we_vote_id)
+#         except Exception as e:
+#             status += "FAILED-CHALLENGE_TO_ORG_PARTICIPANT_UPDATE-FROM_ORG_WE_VOTE_ID-WITH_NAME: " + str(e) + " "
+#         try:
+#             challenge_news_item_entries_moved += ChallengeNewsItem.objects \
+#                 .filter(organization_we_vote_id=from_organization_we_vote_id) \
+#                 .update(speaker_name=to_organization_name,
+#                         organization_we_vote_id=to_organization_we_vote_id)
+#         except Exception as e:
+#             status += "FAILED-CHALLENGE_NEWS_ITEM_UPDATE-FROM_ORG_WE_VOTE_ID: " + str(e) + " "
+#     else:
+#         try:
+#             challenge_owner_entries_moved += ChallengeOwner.objects \
+#                 .filter(organization_we_vote_id=from_organization_we_vote_id) \
+#                 .update(organization_we_vote_id=to_organization_we_vote_id)
+#         except Exception as e:
+#             status += "FAILED-CHALLENGE_TO_ORG_OWNER_UPDATE-FROM_ORG_WE_VOTE_ID: " + str(e) + " "
+#         try:
+#             challenge_participant_entries_moved += ChallengeParticipant.objects \
+#                 .filter(organization_we_vote_id=from_organization_we_vote_id) \
+#                 .update(organization_we_vote_id=to_organization_we_vote_id)
+#         except Exception as e:
+#             status += "FAILED-CHALLENGE_TO_ORG_PARTICIPANT_UPDATE-FROM_ORG_WE_VOTE_ID: " + str(e) + " "
+#         try:
+#             challenge_news_item_entries_moved += ChallengeNewsItem.objects \
+#                 .filter(organization_we_vote_id=from_organization_we_vote_id) \
+#                 .update(organization_we_vote_id=to_organization_we_vote_id)
+#         except Exception as e:
+#             status += "FAILED-CHALLENGE_NEWS_ITEM_UPDATE-FROM_ORG_WE_VOTE_ID: " + str(e) + " "
+#
+#     results = {
+#         'status':                           status,
+#         'success':                          success,
+#         'from_organization_we_vote_id':     from_organization_we_vote_id,
+#         'to_organization_we_vote_id':       to_organization_we_vote_id,
+#         'challenges_moved':                 challenge_owner_entries_moved,
+#         'challenge_owner_entries_moved':    challenge_owner_entries_moved,
+#     }
+#     return results
+
+
+# def move_challenge_to_another_politician(
+#         from_politician_we_vote_id='',
+#         to_politician_we_vote_id=''):
+#     """
+#
+#     :param from_politician_we_vote_id:
+#     :param to_politician_we_vote_id:
+#     :return:
+#     """
+#     status = ''
+#     success = True
+#     challenges_moved = 0
+#
+#     if positive_value_exists(from_politician_we_vote_id):
+#         try:
+#             challenges_moved += ChallengePolitician.objects \
+#                 .filter(politician_we_vote_id=from_politician_we_vote_id) \
+#                 .update(politician_we_vote_id=to_politician_we_vote_id)
+#         except Exception as e:
+#             status += "FAILED_MOVE_CHALLENGE_BY_POLITICIAN_WE_VOTE_ID: " + str(e) + " "
+#             success = False
+#
+#     results = {
+#         'status':                   status,
+#         'success':                  success,
+#         'challenges_moved':  challenges_moved,
+#     }
+#     return results
+
+
+def move_challenges_to_another_voter(from_voter_we_vote_id, to_voter_we_vote_id, to_organization_we_vote_id):
     status = ''
     success = True
     challenges_moved = 0
-    challenge_listed_entries_moved = 0
+    challenge_invitee_entries_moved = 0
+    # challenge_listed_entries_moved = 0
     challenge_news_item_entries_moved = 0
     challenge_owner_entries_moved = 0
     challenge_participant_entries_moved = 0
 
-    if not positive_value_exists(from_organization_we_vote_id) or not positive_value_exists(to_organization_we_vote_id):
-        status += "MOVE_CHALLENGE_TO_ORG-MISSING_EITHER_FROM_OR_TO_ORG_WE_VOTE_ID "
-        success = False
-        results = {
-            'status':                           status,
-            'success':                          success,
-            'from_organization_we_vote_id':     from_organization_we_vote_id,
-            'to_organization_we_vote_id':       to_organization_we_vote_id,
-            'challenges_moved':                 challenges_moved,
-            'challenge_owner_entries_moved':    challenge_owner_entries_moved,
-        }
-        return results
-
-    if from_organization_we_vote_id == to_organization_we_vote_id:
-        status += "MOVE_CHALLENGE_TO_ORG-FROM_AND_TO_ORG_WE_VOTE_IDS_IDENTICAL "
-        success = False
-        results = {
-            'status':                           status,
-            'success':                          success,
-            'from_organization_we_vote_id':     from_organization_we_vote_id,
-            'to_organization_we_vote_id':       to_organization_we_vote_id,
-            'challenges_moved':                 challenges_moved,
-            'challenge_owner_entries_moved':    challenge_owner_entries_moved,
-        }
-        return results
-
-    # #############################################
-    # Move based on organization_we_vote_id
-    if positive_value_exists(to_organization_name):
-        try:
-            challenge_owner_entries_moved += ChallengeOwner.objects \
-                .filter(organization_we_vote_id=from_organization_we_vote_id) \
-                .update(organization_name=to_organization_name,
-                        organization_we_vote_id=to_organization_we_vote_id)
-        except Exception as e:
-            status += "FAILED-CHALLENGE_TO_ORG_OWNER_UPDATE-FROM_ORG_WE_VOTE_ID-WITH_NAME: " + str(e) + " "
-        try:
-            challenge_participant_entries_moved += ChallengeParticipant.objects \
-                .filter(organization_we_vote_id=from_organization_we_vote_id) \
-                .update(participant_name=to_organization_name,
-                        organization_we_vote_id=to_organization_we_vote_id)
-        except Exception as e:
-            status += "FAILED-CHALLENGE_TO_ORG_PARTICIPANT_UPDATE-FROM_ORG_WE_VOTE_ID-WITH_NAME: " + str(e) + " "
-        try:
-            challenge_news_item_entries_moved += ChallengeNewsItem.objects \
-                .filter(organization_we_vote_id=from_organization_we_vote_id) \
-                .update(speaker_name=to_organization_name,
-                        organization_we_vote_id=to_organization_we_vote_id)
-        except Exception as e:
-            status += "FAILED-CHALLENGE_NEWS_ITEM_UPDATE-FROM_ORG_WE_VOTE_ID: " + str(e) + " "
-    else:
-        try:
-            challenge_owner_entries_moved += ChallengeOwner.objects \
-                .filter(organization_we_vote_id=from_organization_we_vote_id) \
-                .update(organization_we_vote_id=to_organization_we_vote_id)
-        except Exception as e:
-            status += "FAILED-CHALLENGE_TO_ORG_OWNER_UPDATE-FROM_ORG_WE_VOTE_ID: " + str(e) + " "
-        try:
-            challenge_participant_entries_moved += ChallengeParticipant.objects \
-                .filter(organization_we_vote_id=from_organization_we_vote_id) \
-                .update(organization_we_vote_id=to_organization_we_vote_id)
-        except Exception as e:
-            status += "FAILED-CHALLENGE_TO_ORG_PARTICIPANT_UPDATE-FROM_ORG_WE_VOTE_ID: " + str(e) + " "
-        try:
-            challenge_news_item_entries_moved += ChallengeNewsItem.objects \
-                .filter(organization_we_vote_id=from_organization_we_vote_id) \
-                .update(organization_we_vote_id=to_organization_we_vote_id)
-        except Exception as e:
-            status += "FAILED-CHALLENGE_NEWS_ITEM_UPDATE-FROM_ORG_WE_VOTE_ID: " + str(e) + " "
-
-    try:
-        challenge_listed_entries_moved += ChallengeListedByOrganization.objects \
-            .filter(site_owner_organization_we_vote_id=from_organization_we_vote_id) \
-            .update(site_owner_organization_we_vote_id=to_organization_we_vote_id)
-    except Exception as e:
-        status += "FAILED-CHALLENGE_LISTED_BY_ORG_UPDATE-FROM_ORG_WE_VOTE_ID: " + str(e) + " "
-
-    results = {
+    error_results = {
         'status':                           status,
         'success':                          success,
-        'from_organization_we_vote_id':     from_organization_we_vote_id,
-        'to_organization_we_vote_id':       to_organization_we_vote_id,
-        'challenges_moved':                 challenge_owner_entries_moved,
+        'from_voter_we_vote_id':            from_voter_we_vote_id,
+        'to_voter_we_vote_id':              to_voter_we_vote_id,
+        'challenges_moved':                 challenges_moved,
+        'challenge_invitee_entries_moved':  challenge_invitee_entries_moved,
+        'challenge_news_item_entries_moved': challenge_news_item_entries_moved,
         'challenge_owner_entries_moved':    challenge_owner_entries_moved,
+        'challenge_participant_entries_moved': challenge_participant_entries_moved,
     }
-    return results
-
-
-def move_challenge_to_another_politician(
-        from_politician_we_vote_id='',
-        to_politician_we_vote_id=''):
-    """
-
-    :param from_politician_we_vote_id:
-    :param to_politician_we_vote_id:
-    :return:
-    """
-    status = ''
-    success = True
-    challenges_moved = 0
-
-    if positive_value_exists(from_politician_we_vote_id):
-        try:
-            challenges_moved += ChallengePolitician.objects \
-                .filter(politician_we_vote_id=from_politician_we_vote_id) \
-                .update(politician_we_vote_id=to_politician_we_vote_id)
-        except Exception as e:
-            status += "FAILED_MOVE_CHALLENGE_BY_POLITICIAN_WE_VOTE_ID: " + str(e) + " "
-            success = False
-
-    results = {
-        'status':                   status,
-        'success':                  success,
-        'challenges_moved':  challenges_moved,
-    }
-    return results
-
-
-def move_challenge_to_another_voter(
-        from_voter_we_vote_id, to_voter_we_vote_id, from_organization_we_vote_id, to_organization_we_vote_id,
-        to_organization_name=None):
-    status = ''
-    success = True
-    challenges_moved = 0
-    challenge_listed_entries_moved = 0
-    challenge_news_item_entries_moved = 0
-    challenge_owner_entries_moved = 0
-    challenge_participant_entries_moved = 0
 
     if not positive_value_exists(from_voter_we_vote_id) or not positive_value_exists(to_voter_we_vote_id):
         status += "MOVE_CHALLENGE-MISSING_EITHER_FROM_OR_TO_VOTER_WE_VOTE_ID "
-        success = False
-        results = {
-            'status':                           status,
-            'success':                          success,
-            'from_voter_we_vote_id':            from_voter_we_vote_id,
-            'to_voter_we_vote_id':              to_voter_we_vote_id,
-            'challenges_moved':                 challenges_moved,
-            'challenge_owner_entries_moved':    challenge_owner_entries_moved,
-        }
-        return results
+        error_results['success'] = False
+        error_results['status'] = status
+        return error_results
 
     if from_voter_we_vote_id == to_voter_we_vote_id:
         status += "MOVE_CHALLENGE-FROM_AND_TO_VOTER_WE_VOTE_IDS_IDENTICAL "
-        success = False
-        results = {
-            'status':                           status,
-            'success':                          success,
-            'from_voter_we_vote_id':            from_voter_we_vote_id,
-            'to_voter_we_vote_id':              to_voter_we_vote_id,
-            'challenges_moved':                 challenges_moved,
-            'challenge_owner_entries_moved':    challenge_owner_entries_moved,
-        }
-        return results
+        error_results['success'] = False
+        error_results['status'] = status
+        return error_results
 
     # ######################
     # Move based on started_by_voter_we_vote_id
@@ -2273,195 +1962,44 @@ def move_challenge_to_another_voter(
 
     # ######################
     # Move participants based on voter_we_vote_id
-    try:
-        challenge_participant_entries_moved += ChallengeParticipant.objects\
-            .filter(voter_we_vote_id=from_voter_we_vote_id)\
-            .update(voter_we_vote_id=to_voter_we_vote_id)
-    except Exception as e:
-        status += "FAILED-CHALLENGE_PARTICIPANT_UPDATE-FROM_VOTER_WE_VOTE_ID: " + str(e) + " "
-        success = False
-
-    # #############################################
-    # Move based on organization_we_vote_id
-    if positive_value_exists(to_organization_name):
-        try:
-            challenge_owner_entries_moved += ChallengeOwner.objects \
-                .filter(organization_we_vote_id=from_organization_we_vote_id) \
-                .update(organization_name=to_organization_name,
-                        organization_we_vote_id=to_organization_we_vote_id)
-        except Exception as e:
-            status += "FAILED-CHALLENGE_OWNER_UPDATE-FROM_ORG_WE_VOTE_ID-WITH_NAME: " + str(e) + " "
-            success = False
-        try:
-            challenge_participant_entries_moved += ChallengeParticipant.objects \
-                .filter(organization_we_vote_id=from_organization_we_vote_id) \
-                .update(participant_name=to_organization_name,
-                        organization_we_vote_id=to_organization_we_vote_id)
-        except Exception as e:
-            status += "FAILED-CHALLENGE_PARTICIPANT_UPDATE-FROM_ORG_WE_VOTE_ID-WITH_NAME: " + str(e) + " "
-            success = False
-        try:
-            challenge_news_item_entries_moved += ChallengeNewsItem.objects \
-                .filter(organization_we_vote_id=from_organization_we_vote_id) \
-                .update(speaker_name=to_organization_name,
-                        organization_we_vote_id=to_organization_we_vote_id)
-        except Exception as e:
-            status += "FAILED-CHALLENGE_NEWS_ITEM_UPDATE-FROM_ORG_WE_VOTE_ID: " + str(e) + " "
-            success = False
+    from challenge.controllers_participant import move_participant_entries_to_another_voter
+    participant_results = move_participant_entries_to_another_voter(
+        from_voter_we_vote_id, to_voter_we_vote_id, to_organization_we_vote_id)
+    if participant_results['success']:
+        challenge_participant_entries_moved = participant_results['participant_entries_moved']
     else:
-        try:
-            challenge_owner_entries_moved += ChallengeOwner.objects \
-                .filter(organization_we_vote_id=from_organization_we_vote_id) \
-                .update(organization_we_vote_id=to_organization_we_vote_id)
-        except Exception as e:
-            status += "FAILED-CHALLENGE_OWNER_UPDATE-FROM_ORG_WE_VOTE_ID: " + str(e) + " "
-            success = False
-        try:
-            challenge_participant_entries_moved += ChallengeParticipant.objects \
-                .filter(organization_we_vote_id=from_organization_we_vote_id) \
-                .update(organization_we_vote_id=to_organization_we_vote_id)
-        except Exception as e:
-            status += "FAILED-CHALLENGE_PARTICIPANT_UPDATE-FROM_ORG_WE_VOTE_ID: " + str(e) + " "
-            success = False
-        try:
-            challenge_news_item_entries_moved += ChallengeNewsItem.objects \
-                .filter(organization_we_vote_id=from_organization_we_vote_id) \
-                .update(organization_we_vote_id=to_organization_we_vote_id)
-        except Exception as e:
-            status += "FAILED-CHALLENGE_NEWS_ITEM_UPDATE-FROM_ORG_WE_VOTE_ID: " + str(e) + " "
-            success = False
-
-    try:
-        challenge_listed_entries_moved += ChallengeListedByOrganization.objects \
-            .filter(site_owner_organization_we_vote_id=from_organization_we_vote_id) \
-            .update(site_owner_organization_we_vote_id=to_organization_we_vote_id)
-    except Exception as e:
-        status += "FAILED-CHALLENGE_LISTED_BY_ORG_UPDATE-FROM_ORG_WE_VOTE_ID: " + str(e) + " "
+        status += participant_results['status'] + " "
         success = False
+
+    # ######################
+    # Move invitees based on voter_we_vote_id
+    from challenge.controllers_invitee import move_invitee_entries_to_another_voter
+    invitee_results = move_invitee_entries_to_another_voter(
+        from_voter_we_vote_id, to_voter_we_vote_id)
+    if invitee_results['success']:
+        challenge_invitee_entries_moved = invitee_results['invitee_entries_moved']
+    else:
+        status += invitee_results['status'] + " "
+        success = False
+
+    # try:
+    #     challenge_listed_entries_moved += ChallengeListedByOrganization.objects \
+    #         .filter(site_owner_organization_we_vote_id=from_organization_we_vote_id) \
+    #         .update(site_owner_organization_we_vote_id=to_organization_we_vote_id)
+    # except Exception as e:
+    #     status += "FAILED-CHALLENGE_LISTED_BY_ORG_UPDATE-FROM_ORG_WE_VOTE_ID: " + str(e) + " "
+    #     success = False
 
     results = {
         'status':                           status,
         'success':                          success,
         'from_voter_we_vote_id':            from_voter_we_vote_id,
         'to_voter_we_vote_id':              to_voter_we_vote_id,
-        'challenges_moved':                 challenge_owner_entries_moved,
+        'challenges_moved':                 challenges_moved,
+        'challenge_invitee_entries_moved':  challenge_invitee_entries_moved,
+        'challenge_news_item_entries_moved': challenge_news_item_entries_moved,
         'challenge_owner_entries_moved':    challenge_owner_entries_moved,
-    }
-    return results
-
-
-def delete_challenge_participants_after_positions_removed(
-        request,
-        friends_only_positions=False,
-        state_code=''):
-    # Create default variables needed below
-    challenge_participant_entries_deleted_count = 0
-    challenge_we_vote_id_list_to_refresh = []
-    number_to_delete = 20  # 1000
-    from position.models import PositionEntered, PositionForFriends
-    position_objects_to_set_challenge_participant_created_true = []  # Field is 'challenge_participant_created'
-    position_updates_made = 0
-    position_we_vote_id_list_to_remove_from_challenge_participants = []
-    challenge_participant_id_list_to_delete = []
-    status = ''
-    success = True
-    # timezone = pytz.timezone("America/Los_Angeles")
-    # datetime_now = timezone.localize(datetime.now())
-    # datetime_now = generate_localized_datetime_from_obj()[1]
-    # date_today_as_integer = convert_date_to_date_as_integer(datetime_now)
-    date_today_as_integer = get_current_date_as_integer()
-    update_message = ''
-
-    try:
-        if positive_value_exists(friends_only_positions):
-            position_query = PositionForFriends.objects.all()  # Cannot be readonly, since we bulk_update at the end
-        else:
-            position_query = PositionEntered.objects.all()  # Cannot be readonly, since we bulk_update at the end
-        position_query = position_query.exclude(challenge_participant_created=True)
-        position_query = position_query.exclude(stance=SUPPORT)
-        position_query = position_query.filter(
-            Q(position_ultimate_election_not_linked=True) |
-            Q(position_ultimate_election_date__gte=date_today_as_integer)
-        )
-        if positive_value_exists(state_code):
-            position_query = position_query.filter(state_code__iexact=state_code)
-        total_to_convert = position_query.count()
-        position_list_with_support_removed = list(position_query[:number_to_delete])
-    except Exception as e:
-        position_list_with_support_removed = []
-        total_to_convert = 0
-        update_message += "POSITION_LIST_WITH_SUPPORT_RETRIEVE_FAILED: " + str(e) + " "
-
-    for one_position in position_list_with_support_removed:
-        position_we_vote_id_list_to_remove_from_challenge_participants.append(one_position.we_vote_id)
-
-    challenge_participant_search_success = True
-    if len(position_we_vote_id_list_to_remove_from_challenge_participants) > 0:
-        try:
-            queryset = ChallengeParticipant.objects.using('readonly').all()
-            queryset = queryset.filter(
-                linked_position_we_vote_id__in=position_we_vote_id_list_to_remove_from_challenge_participants)
-            challenge_participant_entries_to_delete = list(queryset)
-            for one_challenge_participant in challenge_participant_entries_to_delete:
-                challenge_participant_id_list_to_delete.append(one_challenge_participant.id)
-        except Exception as e:
-            challenge_participant_search_success = False
-            update_message += "CHALLENGE_PARTICIPANT_RETRIEVE_BY_POSITION_WE_VOTE_ID-FAILED: " + str(e) + " "
-
-    position_updates_needed = False
-    if challenge_participant_search_success:
-        # As long as there haven't been any errors above, we can prepare to mark
-        #  all positions 'challenge_participant_created' = True
-        for one_position in position_list_with_support_removed:
-            one_position.challenge_participant_created = True
-            position_objects_to_set_challenge_participant_created_true.append(one_position)
-            position_updates_made += 1
-            position_updates_needed = True
-
-    challenge_participant_bulk_delete_success = True
-    if len(challenge_participant_id_list_to_delete) > 0:
-        try:
-            queryset = ChallengeParticipant.objects.all()
-            queryset = queryset.filter(id__in=challenge_participant_id_list_to_delete)
-            challenge_participant_entries_deleted_count, challenges_dict = queryset.delete()
-            challenge_participant_bulk_delete_success = True
-            update_message += \
-                "{challenge_participant_entries_deleted_count:,} ChallengeParticipant entries deleted, " \
-                "".format(challenge_participant_entries_deleted_count=challenge_participant_entries_deleted_count)
-        except Exception as e:
-            challenge_participant_bulk_delete_success = False
-            update_message += "CHALLENGE_PARTICIPANT_BULK_DELETE-FAILED: " + str(e) + " "
-
-    if position_updates_needed and challenge_participant_bulk_delete_success:
-        try:
-            if friends_only_positions:
-                PositionForFriends.objects.bulk_update(
-                    position_objects_to_set_challenge_participant_created_true, ['challenge_participant_created'])
-            else:
-                PositionEntered.objects.bulk_update(
-                    position_objects_to_set_challenge_participant_created_true, ['challenge_participant_created'])
-            update_message += \
-                "{position_updates_made:,} positions updated with challenge_participant_created=True, " \
-                "".format(position_updates_made=position_updates_made)
-        except Exception as e:
-            messages.add_message(request, messages.ERROR,
-                                 "ERROR with PositionEntered.objects.bulk_update: {e}, "
-                                 "".format(e=e))
-
-    total_to_convert_after = total_to_convert - number_to_delete if total_to_convert > number_to_delete else 0
-    if positive_value_exists(total_to_convert_after):
-        update_message += \
-            "{total_to_convert_after:,} positions remaining in 'delete ChallengeParticipant' process. " \
-            "".format(total_to_convert_after=total_to_convert_after)
-
-    if positive_value_exists(update_message):
-        messages.add_message(request, messages.INFO, update_message)
-
-    results = {
-        'challenge_participant_entries_deleted':  challenge_participant_entries_deleted_count,
-        'challenge_we_vote_id_list_to_refresh': challenge_we_vote_id_list_to_refresh,
-        'status':   status,
-        'success':  success,
+        'challenge_participant_entries_moved': challenge_participant_entries_moved,
     }
     return results
 
@@ -2678,44 +2216,4 @@ def update_challenges_from_politician_list(politician_list):
         'success':                  success,
         'status':                   status,
     }
-    return results
-
-
-def delete_challenge_participant(voter_to_delete=None):
-    
-    status = ""
-    success = True
-    challenge_participant_deleted = 0
-    challenge_participant_not_deleted = 0
-    voter_to_delete_id = voter_to_delete.we_vote_id
-
-    if not positive_value_exists(voter_to_delete_id):
-        status += "DELETE_CHALLENGE_PARTICIPANT-MISSING_VOTER_ID"
-        success = False
-        results = {
-            'status':                           status,
-            'success':                          success,
-            'voter_to_delete_we_vote_id':       voter_to_delete_id,
-            'challenge_participant_deleted':       challenge_participant_deleted,
-            'challenge_participant_not_deleted':   challenge_participant_not_deleted,
-        }
-        return results
-    
-    try:
-        number_deleted, details = ChallengeParticipant.objects\
-            .filter(voter_we_vote_id=voter_to_delete_id, )\
-            .delete()
-        challenge_participant_deleted += number_deleted
-    except Exception as e:
-        status += "ChallengeParticipant CHALLENGE PARTICIPANT NOT DELETED: " + str(e) + " "
-        challenge_participant_not_deleted += 1
-
-
-    results = {
-        'status':                           status,
-        'success':                          success,
-        'challenge_participant_deleted':      challenge_participant_deleted,
-        'challenge_participant_not_deleted':  challenge_participant_not_deleted,
-    }
-    
     return results

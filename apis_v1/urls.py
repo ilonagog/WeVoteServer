@@ -21,6 +21,7 @@ from apis_v1.views import views_activity, views_apple, views_docs, views_analyti
     views_pledge_to_vote, views_politician, views_position, views_reaction, views_representative, \
     views_retrieve_tables, views_task, views_share, views_twitter, views_voter, views_voter_guide, \
     views_googlebot_site_map
+from apis_v1.views.views_retrieve_tables import backup_one_table_to_s3_view
 from ballot.views_admin import ballot_items_sync_out_view, ballot_returned_sync_out_view
 from candidate.views_admin import candidates_sync_out_view, candidate_to_office_link_sync_out_view
 from issue.views_admin import issue_descriptions_retrieve_view, issues_followed_retrieve_view, \
@@ -99,6 +100,13 @@ urlpatterns = [
                           candidate_to_office_link_sync_out_view, name='candidateToOfficeLinkSyncOutView'),
                   re_path(r'^challengeFollow/', views_challenge.voter_challenge_follow_view,
                           name='challengeFollowView'),
+                  re_path(r'^challengeInviteeRetrieve/',
+                          views_challenge.challenge_invitee_retrieve_view, name='challengeInviteeRetrieveView'),
+                  re_path(r'^challengeInviteeSave/', views_challenge.challenge_invitee_save_view,
+                          name='challengeInviteeSaveView'),
+                  re_path(r'^challengeInviteeListRetrieve/',
+                          views_challenge.challenge_invitee_list_retrieve_view,
+                          name='challengeInviteeListRetrieveView'),
                   re_path(r'^challengeListRetrieve/', views_challenge.challenge_list_retrieve_view,
                           name='challengeListRetrieveView'),
                   re_path(r'^challengeRetrieve/', views_challenge.challenge_retrieve_view,
@@ -109,11 +117,14 @@ urlpatterns = [
                           views_challenge.challenge_news_item_save_view, name='challengeNewsItemSaveView'),
                   re_path(r'^challengeSave/', views_challenge.challenge_save_view, name='challengeSaveView'),
                   # challenge_save_view also used for challengeStartSave
-                  re_path(r'^challengeStartSave/', views_challenge.challenge_save_view, name='challengeStartSaveView'),
+                  re_path(r'^challengeStartSave/', views_challenge.challenge_start_save_view, name='challengeStartSaveView'),
                   re_path(r'^challengeParticipantRetrieve/',
                           views_challenge.challenge_participant_retrieve_view, name='challengeParticipantRetrieveView'),
                   re_path(r'^challengeParticipantSave/', views_challenge.challenge_participant_save_view,
                           name='challengeParticipantSaveView'),
+                  re_path(r'^challengeParticipantListRetrieve/',
+                          views_challenge.challenge_participant_list_retrieve_view,
+                          name='challengeParticipantListRetrieveView'),
                   # url(r'^couponSummaryRetrieve',
                   #     views_donation.coupon_summary_retrieve_for_api_view, name='couponSummaryRetrieve'),
                   # No doc yet
@@ -150,6 +161,7 @@ urlpatterns = [
                   re_path(r'retrieveSQLTables/', views_retrieve_tables.retrieve_sql_tables, name='retrieveSQLTables'),
                   re_path(r'retrieveSQLTablesRowCount/', views_retrieve_tables.retrieve_sql_tables_row_count,
                           name='retrieveSQLTablesRowCount'),
+                  re_path(r'retrieveMaxID/', views_retrieve_tables.retrieve_max_id, name='retrieveMaxID'),
                   re_path(r'^friendInvitationByEmailSend/',
                           views_friend.friend_invitation_by_email_send_view, name='friendInvitationByEmailSendView'),
                   re_path(r'^friendInvitationByEmailVerify/',
@@ -322,8 +334,11 @@ urlpatterns = [
                           sitewide_daily_metrics_sync_out_view, name='sitewideDailyMetricsSyncOutView'),
                   re_path(r'^sitewideElectionMetricsSyncOut/',
                           sitewide_election_metrics_sync_out_view, name='sitewideElectionMetricsSyncOutView'),
+                  re_path(r'^backupOneTableToS3/',
+                          backup_one_table_to_s3_view, name='backupOneTableToS3View'),
                   re_path(r'^sitewideVoterMetricsSyncOut/',
                           sitewide_voter_metrics_sync_out_view, name='sitewideVoterMetricsSyncOutView'),
+
                   # re_path(r'^taskDelete/', views_task.delete_task, name='taskDelete'),
                   # re_path(r'^taskSaveNew/', views_task.save_new_task, name='taskSaveNewView'),
                   # re_path(r'^taskCompletedOutput/', views_task.read_output_record, name='taskCompletedOutput'),
@@ -553,6 +568,12 @@ urlpatterns = [
                        views_docs.candidate_to_office_link_sync_out_doc_view,
                        name='candidateToOfficeLinkSyncOutDocs'),
                   path('docs/challengeFollow/', views_docs.challenge_follow_doc_view, name='challengeFollowDocs'),
+                  path('docs/challengeInviteeRetrieve/',
+                       views_docs.challenge_invitee_retrieve_doc_view, name='challengeInviteeRetrieveDocs'),
+                  path('docs/challengeInviteeSave/',
+                       views_docs.challenge_invitee_save_doc_view, name='challengeInviteeSaveDocs'),
+                  path('docs/challengeInviteeListRetrieve/',
+                       views_docs.challenge_invitee_list_retrieve_doc_view, name='challengeInviteeListRetrieveDocs'),
                   path('docs/challengeListRetrieve/', views_docs.challenge_list_retrieve_doc_view,
                        name='challengeListRetrieveDocs'),
                   path('docs/challengeNewsItemSave/',
@@ -566,6 +587,8 @@ urlpatterns = [
                        views_docs.challenge_participant_retrieve_doc_view, name='challengeParticipantRetrieveDocs'),
                   path('docs/challengeParticipantSave/',
                        views_docs.challenge_participant_save_doc_view, name='challengeParticipantSaveDocs'),
+                  path('docs/challengeParticipantListRetrieve/',
+                       views_docs.challenge_participant_list_retrieve_doc_view, name='challengeParticipantListRetrieveDocs'),
                   path('docs/deviceIdGenerate/', views_docs.device_id_generate_doc_view,
                        name='deviceIdGenerateDocs'),
                   path('docs/deviceStoreFirebaseCloudMessagingToken/',
@@ -733,6 +756,9 @@ urlpatterns = [
                   re_path(r'^docs/sitewideElectionMetricsSyncOut/',
                           views_docs.sitewide_election_metrics_sync_out_doc_view,
                           name='sitewideElectionMetricsSyncOutDocs'),
+                  path('docs/backupOneTableToS3/',
+                       views_docs.backup_one_table_to_s3_doc_view,
+                       name='backupOneTableToS3Docs'),
                   re_path(r'^docs/sitewideVoterMetricsSyncOut/',
                           views_docs.sitewide_voter_metrics_sync_out_doc_view, name='sitewideVoterMetricsSyncOutDocs'),
                   path('docs/searchAll/',

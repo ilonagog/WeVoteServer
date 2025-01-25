@@ -3,95 +3,63 @@
 # -*- coding: UTF-8 -*-
 
 import json
+import os
 import re
+import subprocess
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from io import StringIO
 
-import psycopg2
 from django.http import HttpResponse
 
 import wevote_functions.admin
 from config.base import get_environment_variable
 from retrieve_tables.models import RetrieveTableState
+from retrieve_tables.retrieve_common import get_psycopg2_connection, allowable_tables
 from wevote_functions.functions import positive_value_exists, convert_to_int, get_voter_api_device_id
 from wevote_functions.functions_date import DATE_FORMAT_YMD_HMS
 
 logger = wevote_functions.admin.get_logger(__name__)
 
-# This api will only return the data from the following tables
-allowable_tables = [
-    'ballot_ballotitem',
-    'position_positionentered',
-    'campaign_campaignx',
-    'campaign_campaignxowner',
-    'campaign_campaignxpolitician',
-    'campaign_campaignxlistedbyorganization',
-    'campaign_campaignxnewsitem',
-    'campaign_campaignxseofriendlypath',
-    'campaign_campaignxsupporter',
-    'candidate_candidatesarenotduplicates',
-    'candidate_candidatetoofficelink',
-    'election_ballotpediaelection',
-    'election_election',
-    'electoral_district_electoraldistrict',
-    'issue_issue',
-    'issue_organizationlinktoissue',
-    'measure_contestmeasure',
-    'measure_contestmeasuresarenotduplicates',
-    'office_contestoffice',
-    'office_contestofficesarenotduplicates',
-    'office_contestofficevisitingotherelection',
-    'office_held_officeheld',
-    'organization_organizationreserveddomain',
-    'party_party',
-    'politician_politician',
-    'politician_politiciansarenotduplicates',
-    'representative_representative',
-    'representative_representativesarenotduplicates',
-    'twitter_twitterlinktoorganization',
-    'voter_guide_voterguidepossibility',
-    'voter_guide_voterguidepossibilityposition',
-    'voter_guide_voterguide',
-    'wevote_settings_wevotesetting',
-    'ballot_ballotreturned',
-    'polling_location_pollinglocation',
-    'organization_organization',
-    'candidate_candidatecampaign',
-]
 
 dummy_unique_id = 10000000
 LOCAL_TMP_PATH = '/tmp/'
 
 
-def get_total_row_count():
+def get_max_id(table_name):
     """
-    Returns the total row count of tables to be fetched from the MASTER server
+    Returns the maximum id of table to be fetched from the MASTER server
     Runs on the Master server
     :return: the number of rows
     """
-    conn = psycopg2.connect(
-        database=get_environment_variable('DATABASE_NAME_READONLY'),
-        user=get_environment_variable('DATABASE_USER_READONLY'),
-        password=get_environment_variable('DATABASE_PASSWORD_READONLY'),
-        host=get_environment_variable('DATABASE_HOST_READONLY'),
-        port=get_environment_variable('DATABASE_PORT_READONLY')
-    )
+    conn = get_psycopg2_connection()
+    with conn.cursor() as cursor:
+        sql = "SELECT MAX(id) FROM {table_name};".format(table_name=table_name)
+        cursor.execute(sql)
+        result = cursor.fetchone()
+        max_id = result[0]
+    conn.close()
+    return max_id
+
+
+def get_total_row_count():
+    """
+    Returns the total row count of all tables to be fetched from the MASTER server
+    Runs on the Master server
+    :return: the number of rows
+    """
+    conn = get_psycopg2_connection()
 
     rows = 0
     for table_name in allowable_tables:
         with conn.cursor() as cursor:
-            sql = "SELECT MAX(id) FROM {table_name};".format(table_name=table_name)
+            sql = "SELECT COUNT(*) FROM {table_name};".format(table_name=table_name)
             cursor.execute(sql)
             row = cursor.fetchone()
             if positive_value_exists(row[0]):
                 cnt = int(row[0])
             else:
-                sql = "SELECT COUNT(*) FROM {table_name};".format(table_name=table_name)
-                cursor.execute(sql)
-                row = cursor.fetchone()
-                if positive_value_exists(row[0]):
-                    cnt = int(row[0])
+                cnt = 0
             print('get_total_row_count of table ', table_name, ' is ', cnt)
             rows += cnt
 
@@ -101,6 +69,7 @@ def get_total_row_count():
     return rows
 
 
+# noinspection PyUnusedLocal
 def retrieve_sql_tables_as_csv(voter_api_device_id, table_name, start, end):
     """
     Extract one of the approximately 21 allowable database tables to CSV (pipe delimited) and send it to the
@@ -116,13 +85,7 @@ def retrieve_sql_tables_as_csv(voter_api_device_id, table_name, start, end):
 
     csv_files = {}
     try:
-        conn = psycopg2.connect(
-            database=get_environment_variable('DATABASE_NAME_READONLY'),
-            user=get_environment_variable('DATABASE_USER_READONLY'),
-            password=get_environment_variable('DATABASE_PASSWORD_READONLY'),
-            host=get_environment_variable('DATABASE_HOST_READONLY'),
-            port=get_environment_variable('DATABASE_PORT_READONLY')
-        )
+        conn = get_psycopg2_connection()
 
         # logger.debug("retrieve_sql_tables_as_csv psycopg2 Connected to DB")
 
@@ -210,8 +173,15 @@ def check_for_non_ascii(table_name, row):
 
 
 def fast_load_status_retrieve(request):   # fastLoadStatusRetrieve
+    """
+    Returns fast load status information for the progress update on the HTML page
+    :param request:
+    :return:
+    """
     initialize = positive_value_exists(request.GET.get('initialize', False))
     voter_api_device_id = get_voter_api_device_id(request)
+    if not voter_api_device_id:
+        voter_api_device_id = request.GET.get('voter_api_device_id', '')
     is_running = positive_value_exists(request.GET.get('is_running', True))
     table_name = ''
     chunk = 0
@@ -254,7 +224,7 @@ def fast_load_status_retrieve(request):   # fastLoadStatusRetrieve
         success = False
         row_id = ''
 
-    started_txt = started.strftime(DATE_FORMAT_YMD_HMS) if started else "" # '%Y-%m-%d %H:%M:%S'
+    started_txt = started.strftime(DATE_FORMAT_YMD_HMS) if started else ""  # '%Y-%m-%d %H:%M:%S'
     results = {
         'status': status,
         'success': success,
@@ -269,14 +239,21 @@ def fast_load_status_retrieve(request):   # fastLoadStatusRetrieve
         'row_id': row_id,
     }
 
-    return HttpResponse(json.dumps(results), content_type='application/json')
+    res_str = ""
+    try:
+        res_str = json.dumps(results)
+    except Exception as e:
+        logger.error(f"ERROR - json.dump failed in fast_load_status_retrieve -- {str(e)}")
+
+    return HttpResponse(res_str, content_type='application/json')
 
 
 def fast_load_status_update(request):
     """
     Save updated fast load status
     """
-    voter_api_device_id = get_voter_api_device_id(request)
+    # use the voter_api_device_id from the url (Python), not the one from a cookie (JavaScript)
+    voter_api_device_id = request.GET.get('voter_api_device_id', '')
     table_name = request.GET.get('table_name', '')
     additional_records = convert_to_int(request.GET.get('additional_records', 0))
     chunk = convert_to_int(request.GET.get('chunk', None))
@@ -285,6 +262,7 @@ def fast_load_status_update(request):
     print('fast_load_status_update ENTRY table_name', table_name, chunk, 'no row yet', additional_records)
 
     success = True
+    response_string = "error"
 
     try:
         row = RetrieveTableState.objects.get(voter_api_device_id=voter_api_device_id)
@@ -299,19 +277,140 @@ def fast_load_status_update(request):
             row.total_records = total_records
         row.save()
         status = 'ROW_SAVED'
-        id = row.id
-        print('fast_load_status_update AFTER SAVE table_name', table_name, chunk, row.current_record, additional_records)
+        row_id = row.id
+        response_string = (f"fast_load_status_update AFTER SAVE row_id {row_id}, started_date {row.started_date}, "
+                           f"table_name {row.table_name}, chunk {row.chunk}, current_record {row.current_record}, "
+                           f"total_records {row.total_records}, voter_api_device_id {row.voter_api_device_id}, "
+                           f"additional_records {additional_records}")
+        print(response_string)
 
     except Exception as e:
         logger.error("fast_load_status_update caught exception: " + str(e))
         success = False
         status = 'ROW_NOT_SAVED  ' + str(e)
-        id = -1
+        row_id = -1
 
     results = {
         'status': status,
         'success': success,
-        'row_id': id,
+        'response_string': response_string,
+        'row_id': row_id,
     }
 
     return HttpResponse(json.dumps(results), content_type='application/json')
+
+
+def make_filename_and_command(table_name):
+    db_name = get_environment_variable('DATABASE_NAME')
+    db_user = get_environment_variable('DATABASE_USER')
+    db_password = get_environment_variable('DATABASE_PASSWORD')
+    db_host = get_environment_variable('DATABASE_HOST')
+    db_port = get_environment_variable('DATABASE_PORT')
+
+    # command_str = (f"pg_dump 'postgresql://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}' "
+    #                f"--table='{table_name}' --format='c' --file='{tmp_file_name}' --disable-triggers")
+    # how to check the args list
+    # (3.11.8) WeVoteServer % python -c 'import sys; print(sys.argv[1:])' pg_dump postgresql://stevepodell:stevepg@localhost:5432/WeVoteServerDB --table=ballot_ballotitem --format=c --file=/tmp/backup-ballot_ballotitem-2024-12-10T10:20:40.backup --disable-triggers
+    # ['pg_dump', 'postgresql://stevepodell:stevepg@localhost:5432/WeVoteServerDB', '--table=ballot_ballotitem', '--format=c', '--file=/tmp/backup-ballot_ballotitem-2024-12-10T10:20:40.backup', '--disable-triggers']
+
+    tmp_file_name = f"/tmp/backup-{table_name}-{time.strftime('%Y-%m-%dT%H:%M:%S')}.backup"
+    pgurl = f'postgresql://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}'
+
+
+    command_args = ["pg_dump",
+                    f'postgresql://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}',
+                    f"--table={table_name}",
+                    "--format=c",
+                    f"--file={tmp_file_name}",
+                    "--disable-triggers"]
+
+    return tmp_file_name, command_args
+
+
+def dump_full_postgres_table_to_tmp(table_name):
+    results = {
+        'success': False,
+    }
+    if table_name not in allowable_tables:
+        results = {
+            'status': f"Table {table_name} in not on the allowable tables list!",
+        }
+    else:
+        temp_file_name, command_args = make_filename_and_command(table_name)
+
+        try:
+            # logger.error('experiment: subprocess.run pg_dump command_args: %s', str(command_args))
+            result = subprocess.run(command_args, capture_output=True)  # , shell=False
+            # logger.error('experiment: subprocess.run pg_dump returncode: %s', str(result.returncode))
+            # logger.error('experiment: subprocess.run pg_dump stdout: %s', result.stdout)
+            # logger.error('experiment: subprocess.run pg_dump stderr: %s', result.stderr)
+            print('Dump completed')
+            results['pg_dump_returncode'] = result.returncode
+            results['success'] = True
+            results['temp_file_name'] = temp_file_name
+            results['status'] = f"tmp file {temp_file_name} created"
+            logger.error('Ok: subprocess.run pg_dump temp_file_name : %s', temp_file_name)
+        except Exception as e:
+            logger.error('subprocess.run pg_dump error : %s', str(e))
+            print("!!Problem occurred!!", e)
+            results['success'] = False,
+            results['error string'] = str(e)
+    # logger.error('experiment: subprocess.run pg_dump results : %s', json.dumps(results))
+    return results
+
+
+# noinspection PyUnusedLocal
+def backup_one_table_to_s3_controller(voter_api_device_id, table_name):
+    t0 = time.time()
+    results = {
+        'success': True,
+        'status': '',
+        'aws_s3_file_url': '',
+    }
+
+    if table_name not in allowable_tables:
+        results['success'] = False
+        results['status'] = f"Table {table_name} in not on the allowable tables list!"
+    else:
+        # command_str, filename = make_filename_and_command(table_name)
+        try:
+            import boto3
+            AWS_ACCESS_KEY_ID = get_environment_variable("AWS_ACCESS_KEY_ID")
+            AWS_SECRET_ACCESS_KEY = get_environment_variable("AWS_SECRET_ACCESS_KEY")
+            AWS_REGION_NAME = get_environment_variable("AWS_REGION_NAME")
+            AWS_STORAGE_BUCKET_NAME = get_environment_variable("AWS_STORAGE_BUCKET_NAME")
+            AWS_STORAGE_SERVICE = "s3"
+
+            session = boto3.session.Session(region_name=AWS_REGION_NAME,
+                                            aws_access_key_id=AWS_ACCESS_KEY_ID,
+                                            aws_secret_access_key=AWS_SECRET_ACCESS_KEY)
+            s3 = session.resource(AWS_STORAGE_SERVICE)
+
+            ts = '{:.2f} seconds'.format(time.time() - t0)
+            print(f"About to dump table at {ts} seconds")
+            results = dump_full_postgres_table_to_tmp(table_name)
+            ts: str = '{:.2f} seconds'.format(time.time() - t0)
+            results['dump_table_to_tmp_completed'] = ts
+
+            head, tail = os.path.split(results['temp_file_name'])
+
+            date_tomorrow = datetime.now() + timedelta(days=2)
+
+            ts = '{:.2f} seconds'.format(time.time() - t0)
+            print(f"About to upload to S3 at {ts} seconds")
+
+            s3.Bucket(AWS_STORAGE_BUCKET_NAME).upload_file(
+                results['temp_file_name'], tail, ExtraArgs={'Expires': date_tomorrow, 'ContentType': 'text/html'})
+            aws_s3_file_url = "https://{bucket_name}.s3.amazonaws.com/{file_location}" \
+                              "".format(bucket_name=AWS_STORAGE_BUCKET_NAME, file_location=tail)
+            ts = '{:.2f} seconds'.format(time.time() - t0)
+            results['tmp_file_to_s3_completed'] = str(ts)
+
+            print(f"Done with upload to S3 at {ts} seconds")
+            results['status'] += ', s3 upload completed'
+            results['aws_s3_file_url'] = aws_s3_file_url
+
+        except Exception as e:
+            results.status = 'Error ' + str(e)
+
+    return results

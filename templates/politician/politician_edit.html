@@ -6,6 +6,8 @@
 {%  block content %}
 {% load humanize %}
 {% load template_filters %}
+{% include "admin_tools/speed_statistics_banner.html" with performance_dict=performance_dict %}
+
 <a href="{% url 'politician:politician_list' %}?state_code={{ state_code }}">
     &lt; Back to Politicians</a>
 
@@ -574,10 +576,41 @@
 
 {% include "../form_inputs/one_form_group.html" with field_dict_1=youtube_url_dict %}
 
+<div class="row form-group">
+    <label for="analysis_comment_id" class="pl-4 control-label">
+        Politician Analysis
+    </label>
+    <div class="col">
+        <textarea name="politician_analysis_comment"
+                  class="form-control animated"
+                  id="politician_analysis_comment_id"
+                  placeholder="Note about politician..."></textarea>
+        <input type="checkbox" name="politician_analysis_done" id="politician_analysis_done_id" value="1"
+                {% if politician.politician_analysis_done %}checked{% endif %} />
+        <label for="politician_analysis_done_id" style="font-weight: normal !important;">
+            Politician Analysis Complete. 
+            {% if politician.politician_analysis_done %}
+            <span style="color: darkgray">This is checked because one of our team has researched this politician and could not find more information.</span>
+            {% else %}
+            <span style="color: darkgray">Check this box only if you have fully researched this politician, and cannot find more information.</span>
+            {% endif %}
+        </label>
+    </div>
+</div>
+
 <p><a href="{% url 'politician:politician_list' %}?state_code={{ state_code }}">cancel</a>
 <input name="submit_text" type="submit" value="{% if politician %}Update Politician{% else %}Save New Politician{% endif %}" class="btn-primary" /></p>
 
 <br />
+
+{% if change_log_list %}
+    <br />
+<div class="form-group">
+    {% include "politician/change_log_list.html" with change_log_list=change_log_list %}
+</div>
+{% endif %}
+<br />
+
 {% if politician %}
 
 {% if linked_candidate_list %}

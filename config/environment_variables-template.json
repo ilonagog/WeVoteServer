@@ -11,25 +11,25 @@
 
   "_comment":                       "read/write database settings for local.py",
   "DATABASE_ENGINE":                "django.db.backends.postgresql_psycopg2",
-  "DATABASE_NAME":                  "WeVoteServerDB",
+  "DATABASE_NAME":                  "wevoteserverdb",
   "DATABASE_USER":                  "postgres",
-  "DATABASE_PASSWORD":              "",
+  "DATABASE_PASSWORD":              "admin",
   "DATABASE_HOST":                  "",
   "DATABASE_PORT":                  "",
 
   "_comment":                       "read-only database settings for local.py",
   "DATABASE_ENGINE_READONLY":       "django.db.backends.postgresql_psycopg2",
-  "DATABASE_NAME_READONLY":         "WeVoteServerDB",
+  "DATABASE_NAME_READONLY":         "wevoteserverdb",
   "DATABASE_USER_READONLY":         "postgres",
-  "DATABASE_PASSWORD_READONLY":     "",
+  "DATABASE_PASSWORD_READONLY":     "admin",
   "DATABASE_HOST_READONLY":         "",
   "DATABASE_PORT_READONLY":         "",
 
   "_comment":                       "analytics database settings for local.py",
   "DATABASE_ENGINE_ANALYTICS":      "django.db.backends.postgresql_psycopg2",
-  "DATABASE_NAME_ANALYTICS":        "WeVoteServerDB",
+  "DATABASE_NAME_ANALYTICS":        "wevoteserverdb",
   "DATABASE_USER_ANALYTICS":        "postgres",
-  "DATABASE_PASSWORD_ANALYTICS":    "",
+  "DATABASE_PASSWORD_ANALYTICS":    "admin",
   "DATABASE_HOST_ANALYTICS":        "",
   "DATABASE_PORT_ANALYTICS":        "",
 
@@ -108,9 +108,6 @@
   "_comment":                       "Google Firebase Admin API (for Firebase Cloud Messaging send/receive)",
   "GOOGLE_APPLICATION_CREDENTIALS": "/etc/wevoteapps-f4b59fec8c57.json",
 
- "_comment":                       "Vertex AI name recognition",
-  "GOOGLE_APPLICATION_CREDENTIALS_VERTEX":  "",
-
   "_comment":                       "Google reCAPTCHA",
   "GOOGLE_RECAPTCHA_SECRET_KEY":    "",
 
@@ -131,6 +128,13 @@
   "_comment":                       "import_export_open_people",
   "OPEN_PEOPLE_USERNAME":           "",
   "OPEN_PEOPLE_PASSWORD":           "",
+
+  "_comment":                       "import_export_openreplay",
+  "OPENREPLAY_BASE_URL":            "https://openreplay.wevote.us/api/vi/",
+  "OPENREPLAY_PROJECT_KEY":         "",
+  "OPENREPLAY_ORGANIZATION_KEY":    "",
+  "OPENREPLAY_USERNAME":            "",
+  "OPENREPLAY_PASSWORD":            "",
 
   "_comment":                       "Scheduled Tasks, Retain History of completed tasks for n days",
   "SCHEDULED_TASKS_RETAIN_HISTORY": 90,
@@ -158,7 +162,9 @@
   "_comment-SOCIAL_AUTH_TWITTER_KEY == TWITTER_CONSUMER_KEY": "",
   "_comment-SOCIAL_AUTH_TWITTER_SECRET == TWITTER_CONSUMER_SECRET": "",
   "_comment-MOBILE_PHONE_BYPASS":   "Use this test phone number and code when creating automated tests",
-  "SMS_BYPASS_MOBILE_NUMBER":       "+1 808-935-8555",
+  "BYPASS_SMS_PHONE_NUMBER_FOR_AUTOMATION":       "+1 808-935-8555",
+  "BYPASS_EMAIL_FOR_AUTOMATION":     "bypass@fake.org",
+  "BYPASS_EMAIL_FOR_DELETE_AUTOMATION":     "delete@fake.org",
   "SOCIAL_AUTH_SMS_BYPASS":         "123456",
   "SOCIAL_AUTH_TWITTER_KEY":        "<This is Twitter's `Consumer Key`>",
   "SOCIAL_AUTH_TWITTER_SECRET":     "<This is Twitter's `Consumer Secret`>",

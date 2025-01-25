@@ -66,6 +66,7 @@ def challenge_save_doc_template_values(url_root):
                    '  "status": string,\n' \
                    '  "success": boolean,\n' \
                    '  "challenge_description": string,\n' \
+                   '  "challenge_invite_text_default": string,\n' \
                    '  "challenge_title": string,\n' \
                    '  "challenge_politician_list_exists": boolean,\n' \
                    '  "challenge_we_vote_id": string,\n' \
@@ -135,19 +136,6 @@ def challenge_save_doc_template_values(url_root):
                    '   {\n' \
                    '     "value": string,\n' \
                    '     "label": string,\n' \
-                   '   },\n' \
-                   '   ],\n' \
-                   '  "latest_challenge_participant_endorsement_list": list\n' \
-                   '   [\n' \
-                   '   {\n' \
-                   '     "id": integer,\n' \
-                   '     "challenge_we_vote_id": string,\n' \
-                   '     "date_joined": string,\n' \
-                   '     "organization_we_vote_id": string,\n' \
-                   '     "supporter_endorsement": string,\n' \
-                   '     "participant_name": string,\n' \
-                   '     "voter_we_vote_id": string,\n' \
-                   '     "we_vote_hosted_profile_image_url_tiny": string,\n' \
                    '   },\n' \
                    '   ],\n' \
                    '  "latest_challenge_participant_list": list\n' \

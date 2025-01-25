@@ -7,14 +7,29 @@ from django.http import HttpResponse
 
 import wevote_functions.admin
 from config.base import get_environment_variable
-from retrieve_tables.controllers_master import fast_load_status_retrieve, retrieve_sql_tables_as_csv, \
-    get_total_row_count
+from retrieve_tables.controllers_master import fast_load_status_retrieve, get_total_row_count, get_max_id, \
+    retrieve_sql_tables_as_csv, backup_one_table_to_s3_controller
 from retrieve_tables.controllers_master import fast_load_status_update
 from wevote_functions.functions import get_voter_api_device_id
 
 logger = wevote_functions.admin.get_logger(__name__)
 
 WE_VOTE_SERVER_ROOT_URL = get_environment_variable("WE_VOTE_SERVER_ROOT_URL")
+
+
+def backup_one_table_to_s3_view(request):  # backupOneTableToS3
+    """
+    pg_dump one SQL tables on the master server to AWS s3, for use with December 2025 version of fast load
+    :param request:
+    :return:
+    """
+    table_name = request.GET.get('table_name', 'bad_table_param_error')
+    voter_api_device_id = get_voter_api_device_id(request)
+
+    print("backup_one_table_to_s3 voter_api_device_id: ", voter_api_device_id)
+    json_data = backup_one_table_to_s3_controller(voter_api_device_id, table_name)
+
+    return HttpResponse(json.dumps(json_data), content_type='application/json')
 
 
 def retrieve_sql_tables(request):  # retrieveSQLTables
@@ -28,18 +43,8 @@ def retrieve_sql_tables(request):  # retrieveSQLTables
     end = request.GET.get('end', '')
     voter_api_device_id = get_voter_api_device_id(request)
 
-    # print("retrieveSQLTables voter_api_device_id: ", voter_api_device_id)
-    # DALE 2024-08-30 TURNING OFF DUE TO SERVER OVERLOAD
-    # json_data = retrieve_sql_tables_as_csv(voter_api_device_id, table_name, start, end)
-
-    # Temporary solution
-    status = ''
-    status += "Retrieving SQL tables: " + table_name + " " + start + " " + end + ""
-    status += "TURNED OFF DUE TO SERVER OVERLOAD Please contact Dale for more information. "
-    json_data = {
-        'success': False,
-        'status': status,
-    }
+    print("retrieveSQLTables voter_api_device_id: ", voter_api_device_id)
+    json_data = retrieve_sql_tables_as_csv(voter_api_device_id, table_name, start, end)
 
     return HttpResponse(json.dumps(json_data), content_type='application/json')
 
@@ -57,3 +62,11 @@ def fast_load_status_retrieve_view(request):   # fastLoadStatusRetrieve
 
 def fast_load_status_update_view(request):   # fastLoadStatusUpdate
     return fast_load_status_update(request)
+
+
+def retrieve_max_id(request):                   # retrieveMaxID
+    table_name = request.GET.get('table_name', 'bad_table_param_error')
+    json_data = {
+        'maxID': get_max_id(table_name)
+    }
+    return HttpResponse(json.dumps(json_data), content_type='application/json')

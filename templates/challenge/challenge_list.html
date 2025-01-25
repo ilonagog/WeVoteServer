@@ -102,8 +102,10 @@
     <br />
 
 {% if challenge_search %}
-    <a href="{% url 'challenge:challenge_list' %}?state_code={{ state_code }}">
-         clear search</a>&nbsp;
+    <a href="#" onclick="clearSearch(); return false">clear search</a>&nbsp;
+
+    <!-- <a href="{% url 'challenge:challenge_list' %}?state_code={{ state_code }}">
+         clear search</a>&nbsp; -->
 {% endif %}
     <input type="text" name="challenge_search" id="challenge_search_id" value="{{ challenge_search }}" />
     <input type="submit" id="challenge_search_submit" value="Search for Challenge" />
@@ -144,7 +146,7 @@
                   </a>
               {% endif %}
             </th>
-            <th style="min-width: 90px">Chipped In</th>
+            <th>Invitees</th>
             <th>Description</th>
         </tr>
       </thead>
@@ -235,7 +237,7 @@
             </td>
         {% endif %}
             <td style="text-align: right">{% if challenge.participants_count %}
-                <a href="{% url 'challenge:participants_list' challenge.we_vote_id %}?challenge_owner_organization_we_vote_id={{ challenge_owner_organization_we_vote_id }}&challenge_search={{ challenge_search }}" target="_blank">
+                <a href="{% url 'challenge:participant_list' challenge.we_vote_id %}?challenge_owner_organization_we_vote_id={{ challenge_owner_organization_we_vote_id }}&challenge_search={{ challenge_search }}" target="_blank">
                     {{ challenge.participants_count|intcomma }} <span class="glyphicon glyphicon-new-window" style="font-size: .95rem"></span>
                 </a>
                 {% if challenge.participants_count_minimum_ignored and challenge.participants_count < 5 %}
@@ -249,19 +251,20 @@
                     (NOT&nbsp;Visible)
                     </span>
                 {% endif %}
-            {% endif %}</td>
-            <td style="text-align: right">
-            {% if challenge.chip_in_total != 'none' %}
-                <a href="{% url 'challenge:participants_list' challenge.we_vote_id %}?show_participants_not_visible_to_public=1" target="_blank">
-                    {{ challenge.chip_in_total }}
-                    <!--<pre> {% filter force_escape %} {% debug %} {% endfilter %} </pre>-->
-                </a>
             {% endif %}
+            <br />
+            <a href="{% url 'challenge:refresh_participant_info' %}?challenge_we_vote_id={{ challenge.we_vote_id }}">refresh</a>
+            </td>
+            <td style="text-align: right">
+                {{ challenge.invitees_count|intcomma }}
             </td>
             <td>
                 {{ challenge.challenge_description|default_if_none:""|truncatechars:250 }}
-                {% if challenge.date_challenge_started %}
-                    <span class="u-no-break" style="color: darkgray">(Started: {{ challenge.date_challenge_started }})</span>
+                {% if challenge.challenge_starts_date_as_integer %}
+                    <span class="u-no-break" style="color: darkgray">(Started: {{ challenge.challenge_starts_date_as_integer }})</span>
+                {% endif %}
+                {% if challenge.challenge_ends_date_as_integer %}
+                    <span class="u-no-break" style="color: darkgray">(Ends: {{ challenge.challenge_ends_date_as_integer }})</span>
                 {% endif %}
                 {% if challenge.final_election_date_as_integer %}
                     <span class="u-no-break" style="color: gray">
@@ -296,54 +299,71 @@
 
     <p></p>
 
-    <script>
-        function displayLoadingBanner() {
-            document.getElementById('FilterPopupMessage').style.display = 'block';
-        }
+<script>
+    function displayLoadingBanner() {
+        $('#FilterPopupMessage').show();
+    }
+
+    function clearSearch() {
+        displayLoadingBanner();
+        $('#challenge_search_id').val('');
+        $('form[name="state_code_form"]').submit();
+    }
+
+    $(function() {
+        $('#limit_to_opinions_in_this_year_id').change(function() {
+            this.form.submit();
+        });
+
+        $('#limit_to_opinions_in_state_code_id').change(function() {
+            this.form.submit();
+        });
+
+        $('#challenge_owner_organization_we_vote_id_id').change(function() {
+            displayLoadingBanner()
+            this.form.submit();
+        });
+
+        $('#challenge_type_filter_id').change(function() {
+            this.form.submit();
+        });
+
+        $('#hide_challenges_not_visible_yet_id').change(function() {
+            displayLoadingBanner()
+            this.form.submit();
+        });
+
+        $('#include_challenges_from_prior_elections_id').change(function() {
+            displayLoadingBanner()
+            this.form.submit();
+        });
+
+        $('#show_blocked_challenges_id').change(function() {
+            displayLoadingBanner()
+            this.form.submit();
+        });
+
+        $('#show_challenges_in_draft_id').change(function() {
+            displayLoadingBanner()
+            this.form.submit();
+        });
+
+        $('#show_challenges_linked_to_politicians_id').change(function() {
+            displayLoadingBanner()
+            this.form.submit();
+        });
+        
+        $('#state_code_id').change(function() {
+            this.form.submit();
+        });
+
         $(function() {
-            $('#limit_to_opinions_in_this_year_id').change(function() {
+            $('#challenge_search_submit').click(function() {
+                displayLoadingBanner();
                 this.form.submit();
             });
-            $('#limit_to_opinions_in_state_code_id').change(function() {
-                this.form.submit();
-            });
-            $('#challenge_owner_organization_we_vote_id_id').change(function() {
-                displayLoadingBanner()
-                this.form.submit();
-            });
-            $('#challenge_type_filter_id').change(function() {
-                this.form.submit();
-            });
-            $('#hide_challenges_not_visible_yet_id').change(function() {
-                displayLoadingBanner()
-                this.form.submit();
-            });
-            $('#include_challenges_from_prior_elections_id').change(function() {
-                displayLoadingBanner()
-                this.form.submit();
-            });
-            $('#show_blocked_challenges_id').change(function() {
-                displayLoadingBanner()
-                this.form.submit();
-            });
-            $('#show_challenges_in_draft_id').change(function() {
-                displayLoadingBanner()
-                this.form.submit();
-            });
-            $('#show_challenges_linked_to_politicians_id').change(function() {
-                displayLoadingBanner()
-                this.form.submit();
-            });
-            $('#state_code_id').change(function() {
-                this.form.submit();
-            });
-            $(function() {
-                $('#challenge_search_submit').click(function() {
-                    displayLoadingBanner();
-                    this.form.submit();
-                });
         });
-        });
-    </script>
+    });
+</script>
 
 {% endblock %}

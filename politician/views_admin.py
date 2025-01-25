@@ -5,6 +5,8 @@ import re
 from base64 import b64encode
 import json
 import string
+from time import time
+from urllib.parse import urlencode
 from datetime import datetime, timedelta
 import pytz
 from django.contrib import messages
@@ -568,7 +570,11 @@ def politician_list_view(request):
         return redirect_to_sign_in_page(request, authority_required)
 
     create_followers_on = positive_value_exists(request.GET.get('create_followers_on', False))
+    exclude_politician_analysis_done = request.GET.get('exclude_politician_analysis_done', False)
+    federal_or_state = positive_value_exists(request.GET.get('federal_or_state', False))
     politicians_to_create_followers_for = convert_to_int(request.GET.get('politicians_to_create_followers_for', 1000))
+    hide_politicians_with_photos = \
+        positive_value_exists(request.GET.get('hide_politicians_with_photos', False))
     google_civic_election_id = convert_to_int(request.GET.get('google_civic_election_id', 0))
     messages_on_stage = get_messages(request)
     organization_manual_intervention_needed = \
@@ -584,6 +590,7 @@ def politician_list_view(request):
     state_code = request.GET.get('state_code', '')
     state_list = STATE_CODE_MAP
     sorted_state_list = sorted(state_list.items())
+    was_candidate_recently = positive_value_exists(request.GET.get('was_candidate_recently', False))
 
     # ################################################
     # Maintenance script section START
@@ -878,6 +885,12 @@ def politician_list_view(request):
     politician_list_count = 0
     try:
         politician_query = Politician.objects.using('readonly').all()
+        if positive_value_exists(exclude_politician_analysis_done):
+            politician_query = politician_query.exclude(politician_analysis_done=True)
+        if positive_value_exists(hide_politicians_with_photos):
+            # Show candidates that do NOT have photos
+            politician_query = politician_query.filter(
+                Q(we_vote_hosted_profile_image_url_medium__isnull=True) | Q(we_vote_hosted_profile_image_url_medium=""))
         if positive_value_exists(show_battleground):
             year_filters = []
             for year_integer in IS_BATTLEGROUND_YEARS_AVAILABLE:
@@ -973,6 +986,9 @@ def politician_list_view(request):
                         final_filters |= item
 
                     politician_query = politician_query.filter(final_filters)
+
+        if positive_value_exists(was_candidate_recently):
+            politician_query = politician_query.filter(politician_ultimate_election_date__gte=20240101)
 
         politician_list_count = politician_query.count()
         if not positive_value_exists(show_all):
@@ -1130,9 +1146,34 @@ def politician_list_view(request):
         web_app_root_url = 'https://localhost:3000'
     else:
         web_app_root_url = 'https://quality.WeVote.US'
+    checkbox_url_variables = "" \
+        "exclude_politician_analysis_done={exclude_politician_analysis_done}" \
+        "&hide_politicians_with_photos={hide_politicians_with_photos}" \
+        "&organization_manual_intervention_needed={organization_manual_intervention_needed}" \
+        "&show_all={show_all}" \
+        "&show_battleground={show_battleground}" \
+        "&show_ocd_id_state_mismatch={show_ocd_id_state_mismatch}" \
+        "&show_politicians_with_email={show_politicians_with_email}" \
+        "&show_related_candidates={show_related_candidates}" \
+        "&was_candidate_recently={was_candidate_recently}" \
+        "".format(
+            exclude_politician_analysis_done=exclude_politician_analysis_done,
+            hide_politicians_with_photos=hide_politicians_with_photos,
+            organization_manual_intervention_needed=organization_manual_intervention_needed,
+            politician_search=politician_search,
+            show_all=show_all,
+            show_battleground=show_battleground,
+            show_ocd_id_state_mismatch=show_ocd_id_state_mismatch,
+            show_politicians_with_email=show_politicians_with_email,
+            show_related_candidates=show_related_candidates,
+            was_candidate_recently=was_candidate_recently,
+            )
     template_values = {
+        'checkbox_url_variables':       checkbox_url_variables,
         'election_list':                election_list,
+        'exclude_politician_analysis_done': exclude_politician_analysis_done,
         'google_civic_election_id':     google_civic_election_id,
+        'hide_politicians_with_photos': hide_politicians_with_photos,
         'messages_on_stage':            messages_on_stage,
         'organization_manual_intervention_needed': organization_manual_intervention_needed,
         'organization_might_be_needed_count':   organization_might_be_needed_count,
@@ -1146,6 +1187,7 @@ def politician_list_view(request):
         'show_ocd_id_state_mismatch':   show_ocd_id_state_mismatch,
         'state_code':                   state_code,
         'state_list':                   sorted_state_list,
+        'was_candidate_recently':       was_candidate_recently,
         'web_app_root_url':             web_app_root_url,
     }
     return render(request, 'politician/politician_list.html', template_values)
@@ -1594,8 +1636,8 @@ def politician_duplicates_list_view(request):
         queryset = queryset.exclude(
             Q(politician2_we_vote_id__isnull=True) | Q(politician2_we_vote_id=''))
         possible_duplicates_count = queryset.count()
-        if not positive_value_exists(show_all):
-            duplicates_list = list(queryset[:200])
+        if positive_value_exists(show_all):
+            duplicates_list = list(queryset)
         else:
             duplicates_list = list(queryset[:1000])
     except ObjectDoesNotExist:
@@ -1706,11 +1748,37 @@ def politician_edit_view(request, politician_id=0, politician_we_vote_id=''):
     vote_usa_politician_id = request.GET.get('vote_usa_politician_id', False)
     youtube_url = request.GET.get('youtube_url', False)
     maplight_id = request.GET.get('maplight_id', False)
+    performance_process_dict = (request.GET.get('performance_process_dict', {}))
+
 
     messages_on_stage = get_messages(request)
     politician_id = convert_to_int(politician_id)
     politician_on_stage_found = False
     politician_on_stage = Politician()
+
+    # The performance_dict variable contains list(s) of performance_snapshots.
+    performance_dict = {}
+    # Take in performance_process_dict from the view that saved data for this candidate. Move the lists of
+    # the performance_snapshots from that view into the local performance_dict.
+    if isinstance(performance_process_dict, str):  # Only parse if it's a string
+        try:
+            performance_process_dict = json.loads(performance_process_dict)
+            try:
+                # Add the lists from performance_process_dict to the lists in performance_dict.
+                performance_dict.update(performance_process_dict)
+            except Exception as e:
+                status += "Error parsing performance_process_dict: {error}".format(error=e)
+        except json.JSONDecodeError:
+            status += "Error decoding performance_process_dict: {error}".format(error=e)
+
+    # Set up performance_list for this view. A pointer to the performance_list variable is established here.
+    #  Throughout the rest of this view, we add snapshots to the performance_list. Since the performance_list
+    #  is "attached" to the performance_dict with a pointer, when we pass performance_dict to the template,
+    #  the performance_list data is included.
+    performance_list = []
+    performance_dict.update({
+        'politician_edit_view': performance_list,
+    })
 
     try:
         if positive_value_exists(politician_id):
@@ -1752,6 +1820,7 @@ def politician_edit_view(request, politician_id=0, politician_we_vote_id=''):
 
         # ##################################
         # Show the seo friendly paths for this politician
+        t0 = time()
         path_count = 0
         path_list = []
         if positive_value_exists(politician_we_vote_id):
@@ -1792,9 +1861,17 @@ def politician_edit_view(request, politician_id=0, politician_we_vote_id=''):
                 organization_error += " ERROR: Organization not found by organization_we_vote_id. "
             except Exception as e:
                 status += 'ERROR_RETRIEVING_FROM_ORGANIZATION: ' + str(e) + ' '
+        t1 = time()
+        performance_snapshot = {
+            'name': 'PoliticianSEOFriendlyPath',
+            'description': 'Retrieve PoliticianSEOFriendlyPath objects for this politician',
+            'time_difference': t1 - t0,
+        }
+        performance_list.append(performance_snapshot)
 
         # ##################################
         # Find organization(s) connected to this politician by politician_we_vote_id
+        t0 = time()
         try:
             from organization.models import Organization
             organization_queryset = Organization.objects.using('readonly').all()
@@ -1824,11 +1901,19 @@ def politician_edit_view(request, politician_id=0, politician_we_vote_id=''):
         if not positive_value_exists(organization_we_vote_id_linked_to_politician) and \
                 positive_value_exists(politician_on_stage.organization_we_vote_id):
             organization_we_vote_id_linked_to_politician = politician_on_stage.organization_we_vote_id
+        t1 = time()
+        performance_snapshot = {
+            'name': 'Find organization(s) connected to this politician by politician_we_vote_id',
+            'description': 'Retrieve Organization objects for this politician',
+            'time_difference': t1 - t0,
+        }
+        performance_list.append(performance_snapshot)
 
         # ##################################
         # Attach FollowOrganization information
         # Working with We Vote Positions, figure out if organization_is_following_politician and attach that variable
         #  with a value of True to the position, if so.
+        t0 = time()
         try:
             politician_position_query = PositionEntered.objects.using('readonly').all()
             politician_position_list = politician_position_query.filter(
@@ -1863,9 +1948,17 @@ def politician_edit_view(request, politician_id=0, politician_we_vote_id=''):
             if positive_value_exists(politician_position.organization_we_vote_id) and \
                     politician_position.organization_we_vote_id in follow_dict:
                 politician_position.organization_is_following_politician = True
+        t1 = time()
+        performance_snapshot = {
+            'name': 'Attach FollowOrganization information',
+            'description': 'Attach organization_is_following_politician to the position',
+            'time_difference': t1 - t0,
+        }
+        performance_list.append(performance_snapshot)
 
         # ##################################
         # Find Candidate "children" of this politician
+        t0 = time()
         try:
             linked_candidate_list = CandidateCampaign.objects.using('readonly').all()
             linked_candidate_list = linked_candidate_list.filter(
@@ -1894,10 +1987,18 @@ def politician_edit_view(request, politician_id=0, politician_we_vote_id=''):
                                 .append(candidate_to_office_link.contest_office_we_vote_id)
                     modified_linked_candidate_list.append(one_candidate)
                 linked_candidate_list = modified_linked_candidate_list
+        t1 = time()
+        performance_snapshot = {
+            'name': 'Find Candidate "children" of this politician',
+            'description': 'Retrieve CandidateCampaign objects for this politician',
+            'time_difference': t1 - t0,
+        }
+        performance_list.append(performance_snapshot)
 
         # ##################################
         # Find Candidates to Link to this Politician
         # Finding Candidates that *might* be "children" of this politician
+        t0 = time()
         from politician.controllers import find_candidates_to_link_to_this_politician
         related_candidate_list = find_candidates_to_link_to_this_politician(politician=politician_on_stage)
 
@@ -2001,38 +2102,77 @@ def politician_edit_view(request, politician_id=0, politician_we_vote_id=''):
             except ObjectDoesNotExist:
                 # This is fine, create new
                 pass
+        t1 = time()
+        performance_snapshot = {
+            'name': 'Find possible duplicate politicians',
+            'description': 'Retrieve Politician objects for this politician',
+            'time_difference': t1 - t0,
+        }
+        performance_list.append(performance_snapshot)
 
         # ##################################
         # Find Representatives Linked to this Politician
+        t0 = time()
         linked_representative_list = []
         if positive_value_exists(politician_we_vote_id):
             queryset = Representative.objects.using('readonly').all()
             queryset = queryset.filter(politician_we_vote_id=politician_we_vote_id)
             linked_representative_list = list(queryset)
+        t1 = time()
+        performance_snapshot = {
+            'name': 'Find Representatives Linked to this Politician',
+            'description': 'Retrieve Representative objects for this politician',
+            'time_difference': t1 - t0,
+        }
 
         # ##################################
         # Find Representatives to Link to this Politician
         # Finding Representatives that *might* be "children" of this politician
+        t0 = time()
         from politician.controllers import find_representatives_to_link_to_this_politician
         related_representative_list = find_representatives_to_link_to_this_politician(politician=politician_on_stage)
+        t1 = time()
+        performance_snapshot = {
+            'name': 'Find Representatives to Link to this Politician',
+            'description': 'Retrieve Representative objects for this politician',
+            'time_difference': t1 - t0,
+        }
+        performance_list.append(performance_snapshot)
 
         # ##################################
         # Find Campaigns Linked to this Politician
+        t0 = time()
         linked_campaignx_list = []
         if positive_value_exists(politician_we_vote_id):
             from campaign.models import CampaignX
             queryset = CampaignX.objects.using('readonly').all()
             queryset = queryset.filter(linked_politician_we_vote_id=politician_we_vote_id)
             linked_campaignx_list = list(queryset)
+        t1 = time()
+        performance_snapshot = {
+            'name': 'Find Campaigns Linked to this Politician',
+            'description': 'Retrieve CampaignX objects for this politician',
+            'time_difference': t1 - t0,
+        }
+        performance_list.append(performance_snapshot)
 
         # ##################################
         # Find Campaigns to Link to this Politician
         # Finding Representatives that *might* be "children" of this politician
+        t0 = time()
         from politician.controllers import find_campaignx_list_to_link_to_this_politician
         related_campaignx_list = find_campaignx_list_to_link_to_this_politician(politician=politician_on_stage)
+        t1 = time()
+        performance_snapshot = {
+            'name': 'Find Campaigns to Link to this Politician',
+            'description': 'Retrieve CampaignX objects for this politician',
+            'time_difference': t1 - t0,
+        }
+        performance_list.append(performance_snapshot)
 
         # ##################################
         # Find Recommendations related to this Politician
+        t0 = time()
         recommended_politicians = []
         if positive_value_exists(politician_we_vote_id):
             from politician.models import RecommendedPoliticianLinkByPolitician
@@ -2043,6 +2183,13 @@ def politician_edit_view(request, politician_id=0, politician_we_vote_id=''):
         recommended_politicians_list = []
         if recommended_politician_we_vote_ids:
             recommended_politicians_list = Politician.objects.filter(we_vote_id__in=recommended_politician_we_vote_ids)
+        t1 = time()
+        performance_snapshot = {
+            'name': 'Find Recommendations related to this Politician',
+            'description': 'Retrieve RecommendedPoliticianLinkByPolitician objects for this politician',
+            'time_difference': t1 - t0,
+        }
+        performance_list.append(performance_snapshot)
 
         politician_linked_campaignx_we_vote_id = ''
         if len(linked_campaignx_list) > 0:
@@ -2150,6 +2297,7 @@ def politician_edit_view(request, politician_id=0, politician_we_vote_id=''):
             'organization_we_vote_id':      organization_we_vote_id_linked_to_politician,
             'path_count':                   path_count,
             'path_list':                    path_list,
+            'performance_dict':             performance_dict,
             'politician':                   politician_on_stage,
             'politician_email':             politician_email,
             'politician_email2':            politician_email2,
@@ -2437,6 +2585,17 @@ def politician_edit_process_view(request):
     :param request:
     :return:
     """
+    # The performance_dict variable contains list(s) of performance_snapshots.
+    performance_dict = {}
+    # Set up performance_list for this view. A pointer to the performance_list variable is established here.
+    #  Throughout the rest of this view, we add snapshots to the performance_list. Since the performance_list
+    #  is "attached" to the performance_dict with a pointer, when we pass performance_dict to the template,
+    #  the performance_list data is included.
+    performance_list = []
+    performance_dict.update({
+        'politician_edit_process_view': performance_list,
+    })
+
     # admin, analytics_admin, partner_organization, political_data_manager, political_data_viewer, verified_volunteer
     authority_required = {'verified_volunteer'}
     if not voter_has_authority(request, authority_required):
@@ -2482,10 +2641,11 @@ def politician_edit_process_view(request):
         instagram_handle = extract_instagram_handle_from_text_string(instagram_handle)
     linkedin_url = request.POST.get('linkedin_url', False)
     maplight_id = request.POST.get('maplight_id', False)
-    candidate_analysis_comment = request.POST.get('candidate_analysis_comment', '')
-    if positive_value_exists(candidate_analysis_comment):
-        change_description += "ANALYSIS_COMMENT: " + candidate_analysis_comment + " "
+    politician_analysis_comment = request.POST.get('politician_analysis_comment', '')
+    if positive_value_exists(politician_analysis_comment):
+        change_description += "ANALYSIS_COMMENT: " + politician_analysis_comment + " "
         change_description_changed = True
+    politician_analysis_done = positive_value_exists(request.POST.get('politician_analysis_done', False))
     politician_email = request.POST.get('politician_email', False)
     politician_email2 = request.POST.get('politician_email2', False)
     politician_email3 = request.POST.get('politician_email3', False)
@@ -2546,6 +2706,7 @@ def politician_edit_process_view(request):
     campaignx_manager = CampaignXManager()
 
     # Check to see if this politician already exists
+    t0 = time()
     politician_on_stage_found = False
     politician_on_stage = Politician()
     politician_manager = PoliticianManager()
@@ -2559,8 +2720,16 @@ def politician_edit_process_view(request):
         except Exception as e:
             messages.add_message(request, messages.ERROR, 'Could not retrieve politician: ' + str(e))
             success = False
+    t1 = time()
+    performance_snapshot = {
+        'name': 'Retrieve existing politician',
+        'description': 'Retrieve existing politician from db',
+        'time_difference': t1 - t0,
+    }
+    performance_list.append(performance_snapshot)
 
     # Check to see if there is a duplicate politician already saved
+    t0 = time()
     existing_politician_found = False
     if not positive_value_exists(politician_id):
         try:
@@ -2627,8 +2796,16 @@ def politician_edit_process_view(request):
         except Exception as e:
             messages.add_message(request, messages.ERROR, 'Could not retrieve politician: ' + str(e))
             success = False
+    t1 = time()
+    performance_snapshot = {
+        'name': 'Retrieve existing politician duplicates',
+        'description': 'Retrieve existing politician duplicates from db',
+        'time_difference': t1 - t0,
+    }
+    performance_list.append(performance_snapshot)
 
     # We can use the same url_variables with any processing failures below
+    t0 = time()
     url_variables = "?ballot_guide_official_statement=" + str(ballot_guide_official_statement) + \
                     "&ballotpedia_politician_name=" + str(ballotpedia_politician_name) + \
                     "&ballotpedia_politician_url=" + str(ballotpedia_politician_url) + \
@@ -2666,6 +2843,13 @@ def politician_edit_process_view(request):
                     "&vote_smart_id=" + str(vote_smart_id) + \
                     "&birth_date=" + str(birth_date) + \
                     "&youtube_url=" + str(youtube_url)
+    t1 = time()
+    performance_snapshot = {
+        'name': 'Set url_variables',
+        'description': 'Set url_variables',
+        'time_difference': t1 - t0,
+    }
+    performance_list.append(performance_snapshot)
 
     if not success:
         messages.add_message(request, messages.ERROR,
@@ -2695,6 +2879,7 @@ def politician_edit_process_view(request):
                 )
                 politician_on_stage_found = True
         if politician_on_stage_found:
+            t0 = time()
             # #################################################
             # Process incoming uploaded photo if there is one
             politician_photo_in_binary_format = None
@@ -2764,9 +2949,17 @@ def politician_edit_process_view(request):
                         regenerate_color = True
                         # politician_on_stage.profile_image_background_color = generate_background(politician_on_stage)
                         # politician_on_stage.profile_image_background_color_needed = False
+            t1 = time()
+            performance_snapshot = {
+                'name': 'Process incoming uploaded photo',
+                'description': 'Process incoming uploaded photo',
+                'time_difference': t1 - t0,
+            }
+            performance_list.append(performance_snapshot)
 
             # ###############################################
             # Now process all other politician fields
+            t0 = time()
             if ballot_guide_official_statement is not False:
                 change_results = change_tracking(
                     existing_value=politician_on_stage.ballot_guide_official_statement,
@@ -2909,6 +3102,7 @@ def politician_edit_process_view(request):
                         years_false_list.append(year)
                     setattr(politician_on_stage, is_battleground_race_key, incoming_is_battleground_race)
             years_list = list(set(years_false_list + years_true_list))
+            politician_on_stage.politician_analysis_done = politician_analysis_done
             if linkedin_url is not False:
                 change_results = change_tracking(
                     existing_value=politician_on_stage.linkedin_url,
@@ -2940,10 +3134,18 @@ def politician_edit_process_view(request):
                     politician_on_stage.organization_we_vote_id = ''
                 except Exception as e:
                     status += 'ERROR_RETRIEVING_FROM_ORGANIZATION: ' + str(e) + ' '
+            t1 = time()
+            performance_snapshot = {
+                'name': 'Process politician fields',
+                'description': 'Processing all other fields in field',
+                'time_difference': t1 - t0,
+            }
+            performance_list.append(performance_snapshot)
 
             if not positive_value_exists(politician_on_stage.organization_we_vote_id):
                 # ##################################
                 # Find Organization that already thinks it is linked to this politician
+                t0 = time()
                 try:
                     from organization.models import Organization
                     organization_queryset = Organization.objects.using('readonly').all()
@@ -3158,7 +3360,6 @@ def politician_edit_process_view(request):
             elif not positive_value_exists(politician_on_stage.seo_friendly_path):
                 update_to_new_seo_friendly_path = True
             if update_to_new_seo_friendly_path:
-                # If path isn't passed in, create one. If provided, verify it is unique.
                 seo_results = politician_manager.generate_seo_friendly_path(
                     base_pathname_string=seo_friendly_path,
                     politician_name=politician_on_stage.politician_name,
@@ -3172,9 +3373,17 @@ def politician_edit_process_view(request):
                     # Update linked candidate & representative entries to use this latest seo_friendly_path
                     push_seo_friendly_path_changes = True
                 politician_on_stage.seo_friendly_path = seo_friendly_path
+                t1 = time()
+                performance_snapshot = {
+                    'name': 'Generate SEO friendly path',
+                    'description': 'Generate SEO friendly path',
+                    'time_difference': t1 - t0,
+                }
+                performance_list.append(performance_snapshot)
 
             # Now generate_seo_friendly_path if there isn't one
             #  This code is not redundant because of a few rare cases where we can fall-through the logic above.
+            t0 = time()
             if not positive_value_exists(politician_on_stage.seo_friendly_path):
                 seo_results = politician_manager.generate_seo_friendly_path(
                     base_pathname_string=politician_on_stage.seo_friendly_path,
@@ -3191,6 +3400,13 @@ def politician_edit_process_view(request):
                         status += seo_results['status'] + ' '
                 else:
                     status += seo_results['status'] + ' '
+            t1 = time()
+            performance_snapshot = {
+                'name': 'Generate SEO friendly path',
+                'description': 'Generate SEO friendly path',
+                'time_difference': t1 - t0,
+            }
+            performance_list.append(performance_snapshot)
 
             # if politician_on_stage.twitter_handle_updates_failing != twitter_handle_updates_failing:
             #     changes_found_dict['is_twitter_handle_removed'] = True
@@ -3278,6 +3494,7 @@ def politician_edit_process_view(request):
                         campaignx.save()
 
             # Find current representative for this politician
+            t0 = time()
             representative_manager = RepresentativeManager()
             rep_results = representative_manager.retrieve_representative(
                 politician_we_vote_id=politician_on_stage.we_vote_id)
@@ -3300,6 +3517,13 @@ def politician_edit_process_view(request):
             else:
                 return HttpResponseRedirect(reverse('politician:politician_new', args=()) +
                                             url_variables)
+            t1 = time()
+            performance_snapshot = {
+                'name': 'Save politician',
+                'description': 'Save politician',
+                'time_difference': t1 - t0,
+            }
+            performance_list.append(performance_snapshot)
 
     except Exception as e:
         handle_record_not_saved_exception(e, logger=logger)
@@ -3322,6 +3546,7 @@ def politician_edit_process_view(request):
     position_list_manager = PositionListManager()
     # ##################################
     # Unlink Candidates from this Politician if "unlink_candidate_XXXXX_from_politician" passed in
+    t0 = time()
     try:
         linked_candidate_query = CandidateCampaign.objects.all()
         linked_candidate_query = linked_candidate_query.filter(
@@ -3352,9 +3577,17 @@ def politician_edit_process_view(request):
                                      ''.format(number_changed=results['number_changed']))
             else:
                 pass
+    t1 = time()
+    performance_snapshot = {
+        'name': 'Unlink Candidates',
+        'description': 'Unlink Candidates',
+        'time_difference': t1 - t0,
+    }
+    performance_list.append(performance_snapshot)
 
     # ##################################
     # Unlink Representatives from this Politician if "unlink_representative_XXXXX_from_politician" passed in
+    t0 = time()
     try:
         linked_representative_query = Representative.objects.all()
         linked_representative_query = linked_representative_query.filter(
@@ -3378,16 +3611,32 @@ def politician_edit_process_view(request):
                 messages.add_message(request, messages.INFO, 'Representative unlinked.')
             else:
                 pass
+    t1 = time()
+    performance_snapshot = {
+        'name': 'Unlink Representatives',
+        'description': 'Unlink Representatives',
+        'time_difference': t1 - t0,
+    }
+    performance_list.append(performance_snapshot)
 
     # ##################################
     # Find Candidates to Link to this Politician
     # Finding Candidates that *might* be "children" of this politician
+    t0 = time()
     from politician.controllers import find_candidates_to_link_to_this_politician
 
     related_candidate_list = find_candidates_to_link_to_this_politician(politician=politician_on_stage)
+    t1 = time()
+    performance_snapshot = {
+        'name': 'Find Candidates to Link',
+        'description': 'Find Candidates to Link',
+        'time_difference': t1 - t0,
+    }
+    performance_list.append(performance_snapshot)
 
     # ##################################
     # Link Candidates to this Politician
+    t0 = time()
     for candidate in related_candidate_list:
         if positive_value_exists(candidate.id):
             variable_name = "link_candidate_" + str(candidate.id) + "_to_politician"
@@ -3411,15 +3660,31 @@ def politician_edit_process_view(request):
                                      ''.format(number_changed=results['number_changed']))
             else:
                 pass
+    t1 = time()
+    performance_snapshot = {
+        'name': 'Link Candidates',
+        'description': 'Link Candidates',
+        'time_difference': t1 - t0,
+    }
+    performance_list.append(performance_snapshot)
 
     # ##################################
     # Find Representatives to Link to this Politician
     # Finding Representatives that *might* be "children" of this politician
+    t0 = time()
     from politician.controllers import find_representatives_to_link_to_this_politician
     related_representative_list = find_representatives_to_link_to_this_politician(politician=politician_on_stage)
+    t1 = time()
+    performance_snapshot = {
+        'name': 'Find Representatives to Link',
+        'description': 'Find Representatives to Link',
+        'time_difference': t1 - t0,
+    }
+    performance_list.append(performance_snapshot)
 
     # ##################################
     # Link Representatives to this Politician
+    t0 = time()
     for representative in related_representative_list:
         if positive_value_exists(representative.id):
             variable_name = "link_representative_" + str(representative.id) + "_to_politician"
@@ -3432,6 +3697,13 @@ def politician_edit_process_view(request):
                         positive_value_exists(vote_usa_politician_id):
                     representative.vote_usa_politician_id = vote_usa_politician_id
                 representative.save()
+    t1 = time()
+    performance_snapshot = {
+        'name': 'Link Representatives',
+        'description': 'Link Representatives',
+        'time_difference': t1 - t0,
+    }
+    performance_list.append(performance_snapshot)
 
     # Update Linked CampaignXs with seo_friendly_path
     if success and positive_value_exists(politician_on_stage.we_vote_id) and \
@@ -3564,6 +3836,7 @@ def politician_edit_process_view(request):
 
     # ####################################################################
     # To make sure we have the freshest data, update supporters_count on all objects
+    t0 = time()
     error_message_to_print = ''
     info_message_to_print = ''
     if positive_value_exists(politician_on_stage.linked_campaignx_we_vote_id):
@@ -3628,6 +3901,13 @@ def politician_edit_process_view(request):
                 campaignx_we_vote_id_list=campaignx_we_vote_id_list_to_refresh)
             if positive_value_exists(results['update_message']):
                 update_message += results['update_message']
+    t1 = time()
+    performance_snapshot = {
+        'name': 'Update supporters_count',
+        'description': 'Update supporters_count',
+        'time_difference': t1 - t0,
+    }
+    performance_list.append(performance_snapshot)
 
     # ##################################################
     # Change log and volunteer scoring
@@ -3645,7 +3925,7 @@ def politician_edit_process_view(request):
             voter_we_vote_id = voter_on_stage.we_vote_id
 
         from volunteer_task.controllers import is_candidate_or_politician_analysis_done
-        if positive_value_exists(candidate_analysis_comment) \
+        if positive_value_exists(politician_analysis_comment) \
                 or is_candidate_or_politician_analysis_done(changes_found_dict=changes_found_dict):
             kind_of_log_entry = KIND_OF_LOG_ENTRY_ANALYSIS_COMMENT
         else:
@@ -3705,10 +3985,24 @@ def politician_edit_process_view(request):
     if positive_value_exists(info_message_to_print):
         messages.add_message(request, messages.INFO, info_message_to_print)
 
+    # Since a pointer to performance_list was attached to performance_dict above, the performance_list
+    # data gets passed along within performance_dict. We pass this performance_dict
+    # with the name 'performance_process_dict' so it is clear this is from a "process" view.
+    performance_process_dict_encoded = urlencode({
+        'performance_process_dict': json.dumps(performance_dict)
+    })
+
     if politician_id:
-        return HttpResponseRedirect(reverse('politician:politician_edit', args=(politician_id,)))
+        return HttpResponseRedirect(reverse('politician:politician_edit', args=(
+        politician_id,)) + url_variables + "&" + performance_process_dict_encoded)
     else:
-        return HttpResponseRedirect(reverse('politician:politician_new', args=()))
+        return HttpResponseRedirect(
+            reverse('politician:politician_new', args=()) + url_variables + "&" + performance_process_dict_encoded)
+
+    # if politician_id:
+    #     return HttpResponseRedirect(reverse('politician:politician_edit', args=(politician_id,)))
+    # else:
+    #     return HttpResponseRedirect(reverse('politician:politician_new', args=()))
 
 
 @login_required
@@ -3969,15 +4263,15 @@ def politicians_sync_out_view(request):  # politiciansSyncOut
                     one_dict['birth_date'] = birth_date.strftime('%Y-%m-%d')
                 date_last_updated = one_dict.get('date_last_updated', '')
                 if positive_value_exists(date_last_updated):
-                    one_dict['date_last_updated'] = date_last_updated.strftime(DATE_FORMAT_YMD_HMS) # '%Y-%m-%d %H:%M:%S'
+                    one_dict['date_last_updated'] = date_last_updated.strftime(DATE_FORMAT_YMD_HMS)  # '%Y-%m-%d %H:%M:%S'
                 date_last_updated_from_candidate = one_dict.get('date_last_updated_from_candidate', '')
                 if positive_value_exists(date_last_updated_from_candidate):
                     one_dict['date_last_updated_from_candidate'] = \
-                        date_last_updated_from_candidate.strftime(DATE_FORMAT_YMD_HMS) # '%Y-%m-%d %H:%M:%S'
+                        date_last_updated_from_candidate.strftime(DATE_FORMAT_YMD_HMS)  # '%Y-%m-%d %H:%M:%S'
                 seo_friendly_path_date_last_updated = one_dict.get('seo_friendly_path_date_last_updated', '')
                 if positive_value_exists(seo_friendly_path_date_last_updated):
                     one_dict['seo_friendly_path_date_last_updated'] = \
-                        seo_friendly_path_date_last_updated.strftime(DATE_FORMAT_YMD_HMS) # '%Y-%m-%d %H:%M:%S'
+                        seo_friendly_path_date_last_updated.strftime(DATE_FORMAT_YMD_HMS)  # '%Y-%m-%d %H:%M:%S'
                 modified_politician_dict_list.append(one_dict)
             politician_list_json = list(modified_politician_dict_list)
             return HttpResponse(json.dumps(politician_list_json), content_type='application/json')
@@ -4145,7 +4439,7 @@ def update_politicians_from_candidates_view(request):
         queryset = queryset.exclude(date_last_updated_from_candidate__gt=six_months_ago)
         politician_list = list(queryset[:3000])
     except Exception as e:
-        status += "REPRESENTATIVE_QUERY_FAILED: " + str(e) + " "
+        status += "POLITICIAN_QUERY_FAILED: " + str(e) + " "
 
     # Retrieve all related candidates with one query
     politician_we_vote_id_list = []
@@ -4208,6 +4502,144 @@ def update_politicians_from_candidates_view(request):
                                 "".format(
                                     state_code=state_code))
 
+
+@login_required
+def update_politician_ultimate_election_date_from_candidates_view(request):
+    # admin, analytics_admin, partner_organization, political_data_manager, political_data_viewer, verified_volunteer
+    authority_required = {'verified_volunteer'}
+    if not voter_has_authority(request, authority_required):
+        return redirect_to_sign_in_page(request, authority_required)
+
+    all_entries_processed = False
+    politicians_updated = 0
+    politicians_without_changes = 0
+    status = ""
+    success = True
+    state_code = request.GET.get('state_code', "")
+    safety_valve_limit = 0
+
+    while safety_valve_limit < 30 and success and not all_entries_processed:
+        results = update_politician_ultimate_election_date_from_candidates_action(request)
+        politicians_updated += results['politicians_updated']
+        politicians_without_changes += results['politicians_without_changes']
+        success = results['success']
+        status += results['status']
+        safety_valve_limit += 1
+        total_to_update_after = results['total_to_update_after']
+        if total_to_update_after == 0:
+            all_entries_processed = True
+
+    message = \
+        "Politicians updated: {politicians_updated:,}. " \
+        "Politicians without changes: {politicians_without_changes:,}. " \
+        "".format(
+            politicians_updated=politicians_updated,
+            politicians_without_changes=politicians_without_changes)
+
+    messages.add_message(request, messages.INFO, message)
+
+    return HttpResponseRedirect(reverse('politician:politician_list', args=()) +
+                                "?state_code={state_code}"
+                                "".format(
+                                    state_code=state_code))
+
+
+def update_politician_ultimate_election_date_from_candidates_action(request):
+    # admin, analytics_admin, partner_organization, political_data_manager, political_data_viewer, verified_volunteer
+    status = ""
+    success = True
+    state_code = request.GET.get('state_code', "")
+    total_to_update_after = 0
+
+    politician_list = []
+    try:
+        queryset = Politician.objects.all()
+        if positive_value_exists(state_code):
+            queryset = queryset.filter(state_code__iexact=state_code)
+        # Ignore politicians who have been updated in the last 6 months: date_last_updated_from_politician
+        today = datetime.now().date()
+        six_months = timedelta(weeks=26)
+        six_months_ago = today - six_months
+        queryset = queryset.exclude(date_ultimate_election_last_updated_from_candidate__gt=six_months_ago)
+        total_to_update_after = queryset.count()
+        politician_list = list(queryset[:3000])
+    except Exception as e:
+        status += "POLITICIAN_QUERY_FAILED: " + str(e) + " "
+
+    # Retrieve all related candidates with one query
+    politician_we_vote_id_list = []
+    for politician in politician_list:
+        if positive_value_exists(politician.we_vote_id):
+            if politician.we_vote_id not in politician_we_vote_id_list:
+                politician_we_vote_id_list.append(politician.we_vote_id)
+
+    candidate_list_by_politician_we_vote_id = {}
+    if len(politician_we_vote_id_list) > 0:
+        queryset = CandidateCampaign.objects.all()
+        queryset = queryset.filter(politician_we_vote_id__in=politician_we_vote_id_list)
+        queryset = queryset.filter(candidate_ultimate_election_date__gt=0)
+        queryset = queryset.order_by('-candidate_year', '-candidate_ultimate_election_date')
+        candidate_list = list(queryset)
+        for one_candidate in candidate_list:
+            # Only put the first one in
+            if one_candidate.politician_we_vote_id not in candidate_list_by_politician_we_vote_id:
+                candidate_list_by_politician_we_vote_id[one_candidate.politician_we_vote_id] = one_candidate
+
+    # Loop through all the politicians in this year, and update them with some politician data
+    politician_update_errors = 0
+    update_list = []
+    politicians_updated = 0
+    politicians_without_changes = 0
+    for we_vote_politician in politician_list:
+        we_vote_politician.date_ultimate_election_last_updated_from_candidate = localtime(now()).date()
+        if we_vote_politician.we_vote_id in candidate_list_by_politician_we_vote_id:
+            candidate = candidate_list_by_politician_we_vote_id[we_vote_politician.we_vote_id]
+        else:
+            candidate = None
+        if not candidate or not hasattr(candidate, 'we_vote_id'):
+            update_list.append(we_vote_politician)
+            continue
+
+        if positive_value_exists(candidate.candidate_ultimate_election_date):
+            if positive_value_exists(we_vote_politician.politician_ultimate_election_date):
+                if candidate.candidate_ultimate_election_date > we_vote_politician.politician_ultimate_election_date:
+                    we_vote_politician.politician_ultimate_election_date = candidate.candidate_ultimate_election_date
+                else:
+                    # Don't update because politician_ultimate_election_date is further in future
+                    pass
+            else:
+                we_vote_politician.politician_ultimate_election_date = candidate.candidate_ultimate_election_date
+            politicians_updated += 1
+        else:
+            politicians_without_changes += 1
+        update_list.append(we_vote_politician)
+
+    # Now do bulk update here
+    if len(update_list) > 0:
+        try:
+            updates_made = Politician.objects.bulk_update(
+                update_list,
+                ['date_ultimate_election_last_updated_from_candidate',
+                 'politician_ultimate_election_date'])
+            messages.add_message(request, messages.INFO,
+                                 "{updates_made:,} politician entries updated with ultimate_election_date. "
+                                 "{total_to_update_after:,} remaining."
+                                 "".format(total_to_update_after=total_to_update_after,
+                                           updates_made=updates_made))
+        except Exception as e:
+            messages.add_message(
+                request, messages.ERROR,
+                "ERROR with update_politician_ultimate_election_date_from_candidates_view: {e} "
+                "".format(e=e))
+            success = False
+    results = {
+        'politicians_updated': politicians_updated,
+        'politicians_without_changes': politicians_without_changes,
+        'status': status,
+        'success': success,
+        'total_to_update_after': total_to_update_after,
+    }
+    return results
 
 def update_profile_image_background_color_view_for_politicians(request):
     number_to_update = 5000

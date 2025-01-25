@@ -52,6 +52,7 @@ def challenge_retrieve_doc_template_values(url_root):
                    '  "status": string,\n' \
                    '  "success": boolean,\n' \
                    '  "challenge_description": string,\n' \
+                   '  "challenge_invite_text_default": string,\n' \
                    '  "challenge_title": string,\n' \
                    '  "challenge_politician_list_exists": boolean,\n' \
                    '  "challenge_we_vote_id": string,\n' \
@@ -123,19 +124,6 @@ def challenge_retrieve_doc_template_values(url_root):
                    '     "label": string,\n' \
                    '   },\n' \
                    '   ],\n' \
-                   '  "latest_challenge_participant_endorsement_list": list\n' \
-                   '   [\n' \
-                   '   {\n' \
-                   '     "id": integer,\n' \
-                   '     "challenge_we_vote_id": string,\n' \
-                   '     "date_joined": string,\n' \
-                   '     "organization_we_vote_id": string,\n' \
-                   '     "supporter_endorsement": string,\n' \
-                   '     "participant_name": string,\n' \
-                   '     "voter_we_vote_id": string,\n' \
-                   '     "we_vote_hosted_profile_image_url_tiny": string,\n' \
-                   '   },\n' \
-                   '   ],\n' \
                    '  "latest_challenge_participant_list": list\n' \
                    '   [\n' \
                    '   {\n' \
@@ -153,17 +141,21 @@ def challenge_retrieve_doc_template_values(url_root):
                    '  "seo_friendly_path_list": list\n' \
                    '   [],\n' \
                    '  "voter_challenge_participant": {\n' \
-                   '     "id": integer,\n' \
                    '     "challenge_we_vote_id": string,\n' \
-                   '     "chip_in_total": string,\n' \
-                   '     "date_last_changed": string,\n' \
                    '     "date_joined": string,\n' \
+                   '     "date_last_changed": string,\n' \
+                   '     "invitees_count": number,\n' \
+                   '     "invitees_who_joined": number,\n' \
+                   '     "invitees_who_viewed": number,\n' \
+                   '     "invitees_who_viewed_plus": number,\n' \
+                   '     "invite_text_for_friends": string,\n' \
                    '     "organization_we_vote_id": string,\n' \
-                   '     "supporter_endorsement": string,\n' \
                    '     "participant_name": string,\n' \
+                   '     "points": number,\n' \
+                   '     "rank": number,\n' \
                    '     "visible_to_public": boolean,\n' \
-                   '     "voter_signed_in_with_email": boolean,\n' \
                    '     "voter_we_vote_id": string,\n' \
+                   '     "we_vote_hosted_profile_image_url_medium": string,\n' \
                    '     "we_vote_hosted_profile_image_url_tiny": string,\n' \
                    '   },\n' \
                    '}'

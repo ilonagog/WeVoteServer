@@ -237,7 +237,7 @@ def voter_address_retrieve_view(request):  # voterAddressRetrieve
             'normalized_state': '',
             'normalized_zip': '',
             'success': voter_address_retrieve_results['success'],
-            'status': voter_address_retrieve_results['status'],
+            'status': status,
             'address_found': voter_address_retrieve_results['address_found'],
             'guess_if_no_address_saved': guess_if_no_address_saved,
         }
@@ -365,7 +365,7 @@ def voter_address_retrieve_view(request):  # voterAddressRetrieve
                     'normalized_state': '',
                     'normalized_zip': '',
                     'success': voter_address_retrieve_results['success'],
-                    'status': voter_address_retrieve_results['status'],
+                    'status': status,
                     'address_found': voter_address_retrieve_results['address_found'],
                     'guess_if_no_address_saved': guess_if_no_address_saved,
                 }
@@ -660,7 +660,7 @@ def voter_address_save_view(request):  # voterAddressSave
                     status += save_results['status']
                     google_civic_election_id = save_results['google_civic_election_id']
             else:
-                status += "NOT_REACHING_OUT_TO_VOTE_USA "
+                status += "NOT_REACHING_OUT_TO_CTCL_TEXT_NOT_LONG_ENOUGH "
         elif default_election_data_source_is_vote_usa:
             status += "VOTER_ADDRESS_SAVE-USING_VOTE_USA "
             length_at_which_we_suspect_address_has_street = 25
@@ -725,7 +725,7 @@ def voter_address_save_view(request):  # voterAddressSave
                     status += save_results['status']
                     google_civic_election_id = save_results['google_civic_election_id']
             else:
-                status += "NOT_REACHING_OUT_TO_VOTE_USA "
+                status += "NOT_REACHING_OUT_TO_VOTE_USA_TEXT_NOT_LONG_ENOUGH "
         elif default_election_data_source_is_google_civic:
             # Reach out to Google and populate ballot items in the database with fresh ballot data
             google_retrieve_results = voter_ballot_items_retrieve_from_google_civic_for_api(  # DEBUG=1
@@ -1604,7 +1604,7 @@ def voter_plan_list_retrieve_view(request):  # voterPlanListRetrieve
     for voter_plan in voter_plan_list:
         voter_plan_dict = {
             'date_entered':             voter_plan.date_entered.strftime(DATE_FORMAT_YMD_HMS),  # '%Y-%m-%d %H:%M:%S'
-            'date_last_changed':        voter_plan.date_last_changed.strftime(DATE_FORMAT_YMD_HMS), # '%Y-%m-%d %H:%M:%S'
+            'date_last_changed':        voter_plan.date_last_changed.strftime(DATE_FORMAT_YMD_HMS),  # '%Y-%m-%d %H:%M:%S'
             'google_civic_election_id': voter_plan.google_civic_election_id,
             'show_to_public':           voter_plan.show_to_public,
             'state_code':               voter_plan.state_code,
@@ -1660,8 +1660,8 @@ def voter_plans_for_voter_retrieve_view(request):  # voterPlansForVoterRetrieve
     voter_plan_list = results['voter_plan_list']
     for voter_plan in voter_plan_list:
         voter_plan_dict = {
-            'date_entered':             voter_plan.date_entered.strftime(DATE_FORMAT_YMD_HMS), # '%Y-%m-%d %H:%M:%S'
-            'date_last_changed':        voter_plan.date_last_changed.strftime(DATE_FORMAT_YMD_HMS), # '%Y-%m-%d %H:%M:%S'
+            'date_entered':             voter_plan.date_entered.strftime(DATE_FORMAT_YMD_HMS),  # '%Y-%m-%d %H:%M:%S'
+            'date_last_changed':        voter_plan.date_last_changed.strftime(DATE_FORMAT_YMD_HMS),  # '%Y-%m-%d %H:%M:%S'
             'google_civic_election_id': voter_plan.google_civic_election_id,
             'show_to_public':           voter_plan.show_to_public,
             'state_code':               voter_plan.state_code,
@@ -1745,8 +1745,8 @@ def voter_plan_save_view(request):  # voterPlanSave
     voter_plan_list = results['voter_plan_list']
     for voter_plan in voter_plan_list:
         voter_plan_dict = {
-            'date_entered':             voter_plan.date_entered.strftime(DATE_FORMAT_YMD_HMS), # '%Y-%m-%d %H:%M:%S'
-            'date_last_changed':        voter_plan.date_last_changed.strftime(DATE_FORMAT_YMD_HMS), # '%Y-%m-%d %H:%M:%S'
+            'date_entered':             voter_plan.date_entered.strftime(DATE_FORMAT_YMD_HMS),  # '%Y-%m-%d %H:%M:%S'
+            'date_last_changed':        voter_plan.date_last_changed.strftime(DATE_FORMAT_YMD_HMS),  # '%Y-%m-%d %H:%M:%S'
             'google_civic_election_id': voter_plan.google_civic_election_id,
             'show_to_public':           voter_plan.show_to_public,
             'state_code':               voter_plan.state_code,
@@ -3011,7 +3011,8 @@ def voter_update_view(request):  # voterUpdate
             and positive_value_exists(linked_organization_we_vote_id):
         voter_name_changed = True
     if voter_name_changed or voter_photo_changed:
-        results = organization_manager.retrieve_organization_from_we_vote_id(linked_organization_we_vote_id)
+        results = organization_manager.retrieve_organization_from_we_vote_id(
+            linked_organization_we_vote_id, read_only=False)
         if results['organization_found']:
             organization = results['organization']
             organization_changed = False
@@ -3072,6 +3073,16 @@ def voter_update_view(request):  # voterUpdate
                 except Exception as e:
                     status += "COULD_NOT_SAVE_ORGANIZATION: " + str(e) + " "
                     pass
+
+    if voter_name_changed or voter_photo_changed:
+        # Update ChallengeParticipant records
+        try:
+            from challenge.controllers_participant import update_challenge_participant_entries_from_voter_object
+            results = update_challenge_participant_entries_from_voter_object(voter_object=voter)
+            status += results['status']
+        except Exception as e:
+            status += "COULD_NOT_UPDATE_CHALLENGE_PARTICIPANTS: " + str(e) + " "
+
     if voter_name_needs_to_be_updated_in_activity:
         from activity.models import ActivityManager
         activity_manager = ActivityManager()

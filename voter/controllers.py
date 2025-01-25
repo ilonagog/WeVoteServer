@@ -1677,7 +1677,9 @@ def voter_address_retrieve_for_api(voter_device_id):  # voterAddressRetrieve
             'voter_device_id': voter_device_id,
         }
         return voter_address_retrieve_results
-    return voter_address_retrieve_for_voter_id(voter_id, voter_device_id)
+    results = voter_address_retrieve_for_voter_id(voter_id, voter_device_id)
+    results['voter_device_id'] = voter_device_id
+    return results
 
 
 def voter_address_retrieve_for_voter_id(voter_id, voter_device_id=''):
@@ -1690,7 +1692,7 @@ def voter_address_retrieve_for_voter_id(voter_id, voter_device_id=''):
         status = "VOTER_ADDRESS_RETRIEVE-ADDRESS_FOUND"
 
         voter_address_retrieve_results = {
-            'voter_device_id': voter_device_id,
+            # 'voter_device_id': voter_device_id,
             'address_type': voter_address.address_type if voter_address.address_type else '',
             'text_for_map_search': voter_address.text_for_map_search if voter_address.text_for_map_search else '',
             'google_civic_election_id': voter_address.google_civic_election_id if voter_address.google_civic_election_id
@@ -1718,7 +1720,7 @@ def voter_address_retrieve_for_voter_id(voter_id, voter_device_id=''):
             'status': "VOTER_ADDRESS_NOT_FOUND",
             'success': success,
             'address_found': False,
-            'voter_device_id': voter_device_id,
+            # 'voter_device_id': voter_device_id,
             'address_type': '',
             'text_for_map_search': '',
             'google_civic_election_id': 0,
@@ -3165,6 +3167,33 @@ def voter_merge_two_accounts_action(  # voterMergeTwoAccounts, part 2
     else:
         move_voter_contact_end_time = time()
 
+    move_challenges_start_time = time()
+    if not voter_merge_status.move_challenges_complete:  # Proceed even if process above has failed
+        from challenge.controllers import move_challenges_to_another_voter
+        move_challenges_results = move_challenges_to_another_voter(
+            from_voter_we_vote_id, to_voter_we_vote_id, to_voter_linked_organization_we_vote_id)
+        # Log the results
+        move_challenges_end_time = time()
+        status += move_challenges_results['status']
+        local_success = move_challenges_results['success']
+        if not local_success:
+            success = False
+        results = voter_merge_tracking(
+            end_time=move_challenges_end_time,
+            from_voter_we_vote_id=from_voter_we_vote_id,
+            start_time=move_challenges_start_time,
+            status=status,
+            step_name='move_challenges',
+            success=local_success,
+            to_voter_we_vote_id=to_voter_we_vote_id,
+            voter_merge_status=voter_merge_status)
+        if results['success']:
+            voter_merge_status = results['voter_merge_status']
+        else:
+            success = False
+    else:
+        move_challenges_end_time = time()
+
     move_voter_plan_start_time = time()
     if not voter_merge_status.move_voter_plan_complete:  # Proceed even if process above has failed
         # Bring over the voter's plans to vote
@@ -3636,6 +3665,7 @@ def voter_merge_two_accounts_action(  # voterMergeTwoAccounts, part 2
     move_activity_posts_duration = move_activity_posts_end_time - move_activity_posts_start_time
     move_activity_comments_duration = move_activity_comments_end_time - move_activity_comments_start_time
     move_campaignx_duration = move_campaignx_end_time - move_campaignx_start_time
+    move_challenges_duration = move_challenges_end_time - move_challenges_start_time
     move_analytics_duration = move_analytics_end_time - move_analytics_start_time
     merge_voter_duration = merge_voter_end_time - merge_voter_start_time
     move_images_duration = move_images_end_time - move_images_start_time
@@ -3671,6 +3701,7 @@ def voter_merge_two_accounts_action(  # voterMergeTwoAccounts, part 2
                  ' seconds, move_analytics took ' + "{:.6f}".format(move_analytics_duration) +
                  ' seconds, merge_voter took ' + "{:.6f}".format(merge_voter_duration) +
                  ' seconds, move_images took ' + "{:.6f}".format(move_images_duration) +
+                 ' seconds, move_challenges took ' + "{:.6f}".format(move_challenges_duration) +
                  ' seconds, send_emails took ' + "{:.6f}".format(send_emails_duration) +
                  ' seconds, final_position_repair took ' + "{:.6f}".format(final_position_repair_duration) +
                  ' seconds, total took ' + "{:.6f}".format(time_difference) + ' seconds')
@@ -4173,7 +4204,7 @@ def voter_retrieve_for_api(  # voterRetrieve
                     voter.save()
                     status += "ORGANIZATION_CREATED "
                 except Exception as e:
-                    status += "UNABLE_TO_CREATE_NEW_ORGANIZATION_TO_VOTER_FROM_RETRIEVE_VOTER2 "
+                    status += "UNABLE_TO_CREATE_NEW_ORGANIZATION_TO_VOTER_FROM_RETRIEVE_VOTER2: " + str(e) + " "
 
         if repair_twitter_link_to_voter_caching_now:
             # If here then we know that we have a twitter_link_to_voter, and there was some data cleanup done
@@ -4186,32 +4217,59 @@ def voter_retrieve_for_api(  # voterRetrieve
         analytics_manager = AnalyticsManager()
         if voter.signed_in_facebook():
             is_signed_in = True
-            analytics_manager.save_action(ACTION_FACEBOOK_AUTHENTICATION_EXISTS, voter.we_vote_id, voter_id,
-                                          is_signed_in, user_agent_string=user_agent_string, is_bot=is_bot,
-                                          is_mobile=user_agent_object.is_mobile,
-                                          is_desktop=user_agent_object.is_pc,
-                                          is_tablet=user_agent_object.is_tablet)
+            analytics_manager.save_action(
+                action_constant=ACTION_FACEBOOK_AUTHENTICATION_EXISTS,
+                voter_we_vote_id=voter.we_vote_id,
+                voter_id=voter_id,
+                is_signed_in=is_signed_in,
+                user_agent_string=user_agent_string,
+                is_bot=is_bot,
+                is_mobile=user_agent_object.is_mobile,
+                is_desktop=user_agent_object.is_pc,
+                is_tablet=user_agent_object.is_tablet,
+            )
+
         if voter.signed_in_google():
             is_signed_in = True
-            analytics_manager.save_action(ACTION_GOOGLE_AUTHENTICATION_EXISTS, voter.we_vote_id, voter_id,
-                                          is_signed_in, user_agent_string=user_agent_string, is_bot=is_bot,
-                                          is_mobile=user_agent_object.is_mobile,
-                                          is_desktop=user_agent_object.is_pc,
-                                          is_tablet=user_agent_object.is_tablet)
+            analytics_manager.save_action(
+                action_constant=ACTION_GOOGLE_AUTHENTICATION_EXISTS,
+                voter_we_vote_id=voter.we_vote_id,
+                voter_id=voter_id,
+                is_signed_in=is_signed_in,
+                user_agent_string=user_agent_string,
+                is_bot=is_bot,
+                is_mobile=user_agent_object.is_mobile,
+                is_desktop=user_agent_object.is_pc,
+                is_tablet=user_agent_object.is_tablet,
+            )
+
         if voter.signed_in_twitter():
             is_signed_in = True
-            analytics_manager.save_action(ACTION_TWITTER_AUTHENTICATION_EXISTS, voter.we_vote_id, voter_id,
-                                          is_signed_in, user_agent_string=user_agent_string, is_bot=is_bot,
-                                          is_mobile=user_agent_object.is_mobile,
-                                          is_desktop=user_agent_object.is_pc,
-                                          is_tablet=user_agent_object.is_tablet)
+            analytics_manager.save_action(
+                action_constant=ACTION_TWITTER_AUTHENTICATION_EXISTS,
+                voter_we_vote_id=voter.we_vote_id,
+                voter_id=voter_id,
+                is_signed_in=is_signed_in,
+                user_agent_string=user_agent_string,
+                is_bot=is_bot,
+                is_mobile=user_agent_object.is_mobile,
+                is_desktop=user_agent_object.is_pc,
+                is_tablet=user_agent_object.is_tablet,
+            )
+
         if voter.signed_in_with_email():
             is_signed_in = True
-            analytics_manager.save_action(ACTION_EMAIL_AUTHENTICATION_EXISTS, voter.we_vote_id, voter_id,
-                                          is_signed_in, user_agent_string=user_agent_string, is_bot=is_bot,
-                                          is_mobile=user_agent_object.is_mobile,
-                                          is_desktop=user_agent_object.is_pc,
-                                          is_tablet=user_agent_object.is_tablet)
+            analytics_manager.save_action(
+                action_constant=ACTION_EMAIL_AUTHENTICATION_EXISTS,
+                voter_we_vote_id=voter.we_vote_id,
+                voter_id=voter_id,
+                is_signed_in=is_signed_in,
+                user_agent_string=user_agent_string,
+                is_bot=is_bot,
+                is_mobile=user_agent_object.is_mobile,
+                is_desktop=user_agent_object.is_pc,
+                is_tablet=user_agent_object.is_tablet,
+            )
 
         facebook_profile_image_url_https, \
             we_vote_hosted_profile_image_url_large, \
@@ -4251,7 +4309,7 @@ def voter_retrieve_for_api(  # voterRetrieve
             'success':                          True,
             'address':                          address_results,
             'can_edit_campaignx_owned_by_organization_list': can_edit_campaignx_owned_by_organization_list,
-            'date_joined':                      voter.date_joined.strftime(DATE_FORMAT_YMD_HMS), # '%Y-%m-%d %H:%M:%S'
+            'date_joined':                      voter.date_joined.strftime(DATE_FORMAT_YMD_HMS),  # '%Y-%m-%d %H:%M:%S'
             'email':                            voter.email,
             'facebook_email':                   voter.facebook_email,
             'facebook_id':                      voter.facebook_id,

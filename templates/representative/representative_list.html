@@ -43,6 +43,11 @@
 <form name="state_code_form" method="get" action="{% url 'representative:representative_list' %}">
     {% csrf_token %}
 
+    {% if state_code != "" %}
+    <a href="#" onclick="showAllStates(); return false;">
+        show all states</a>
+    {% endif %}
+
     {% if state_list %}
         <select id="state_code_id" name="state_code">
             <option value="">
@@ -69,8 +74,10 @@
     {% endif %}{# End of if years_available #}
     &nbsp;&nbsp;
     {% if representative_search %}
-    <a href="{% url 'representative:representative_list' %}?state_code={{ state_code }}&show_representatives_with_email={{ show_representatives_with_email }}&show_all={{ show_all }}&show_this_year={{ show_this_year }}">
-         clear search</a>&nbsp;
+    <a href="#" onclick="clearSearch(); return false;">clear search</a>&nbsp;
+
+    <!-- <a href="{% url 'representative:representative_list' %}?state_code={{ state_code }}&show_representatives_with_email={{ show_representatives_with_email }}&show_all={{ show_all }}&show_this_year={{ show_this_year }}">
+         clear search</a>&nbsp; -->
     {% endif %}
     <input type="text" name="representative_search" id="representative_search_id" value="{{ representative_search }}" />
     <input  id="representative_search_submit_id" type="submit" value="Search for Representative" />
@@ -185,58 +192,65 @@
     </p>
 {% endif %}
 
-    <script>
-        function displayLoadingBanner() {
-            document.getElementById('FilterPopupMessage').style.display ='block';
-        }
-        $(function() {
-            $('#missing_politician_id').change(function() {
-                displayLoadingBanner()
-                this.form.submit();
-            });
+<script>
+    function displayLoadingBanner() {
+        $('#FilterPopupMessage').show();
+    }
+
+    function clearSearch() {
+        displayLoadingBanner();
+        $('#representative_search_id').val(''); 
+        $('form[name="state_code_form"]').submit(); 
+    }
+
+    function showAllStates() {
+        displayLoadingBanner();
+        $('#state_code_id').val('');
+        $('form[name="state_code_form"]').submit();
+    }
+
+    $(function() {
+        $('#missing_politician_id').change(function() {
+            displayLoadingBanner()
+            this.form.submit();
         });
-        $(function() {
-            $('#show_all_id').change(function() {
-                displayLoadingBanner()
-                this.form.submit();
-            });
+
+        $('#show_all_id').change(function() {
+            displayLoadingBanner()
+            this.form.submit();
         });
-        $(function() {
-            $('#show_battleground_id').change(function() {
-                displayLoadingBanner()
-                this.form.submit();
-            });
+
+        $('#show_battleground_id').change(function() {
+            displayLoadingBanner()
+            this.form.submit();
         });
-        $(function() {
-            $('#show_representatives_with_email_id').change(function() {
-                displayLoadingBanner()
-                this.form.submit();
-            });
+
+        $('#show_representatives_with_email_id').change(function() {
+            displayLoadingBanner()
+            this.form.submit();
         });
-        $(function() {
-            $('#show_this_year_id').change(function() {
-                displayLoadingBanner()
-                this.form.submit();
-            });
+
+        $('#show_this_year_id').change(function() {
+            displayLoadingBanner()
+            this.form.submit();
         });
-        $(function() {
-            $('#show_ocd_id_state_mismatch_id').change(function() {
-                displayLoadingBanner()
-                this.form.submit();
-            });
+
+        $('#show_ocd_id_state_mismatch_id').change(function() {
+            displayLoadingBanner()
+            this.form.submit();
         });
-        $(function() {
-            $('#state_code_id').change(function() {
-                displayLoadingBanner()
-                this.form.submit();
-            });
+
+        $('#state_code_id').change(function() {
+            displayLoadingBanner()
+            this.form.submit();
         });
-        $(function() {
-            $('#representative_search_submit_id').click(function() {
-                displayLoadingBanner()
-                this.form.submit();
-            });
+
+        $('#representative_search_submit_id').click(function() {
+            displayLoadingBanner()
+            this.form.submit();
         });
-    </script>
+    });
+
+</script>
 
 {% endblock %}

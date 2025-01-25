@@ -659,6 +659,58 @@ def merge_if_duplicate_candidates(candidate1_on_stage, candidate2_on_stage, conf
             success = True
             candidates_merged = True
 
+    # In the special case where candidates are both from CTCL, merge if they have identical names.
+    if positive_value_exists(candidates_merged):
+        # Skip the following
+        pass
+    elif positive_value_exists(candidate1_on_stage.ctcl_uuid) and \
+            positive_value_exists(candidate2_on_stage.ctcl_uuid):
+        candidate_names_match = False
+        candidate_name_matches_alt_name = False
+        each_candidate_has_different_politician = False
+        if positive_value_exists(candidate1_on_stage.candidate_name) and \
+                positive_value_exists(candidate2_on_stage.candidate_name):
+            if candidate1_on_stage.candidate_name.strip().lower() == candidate2_on_stage.candidate_name.strip().lower():
+                candidate_names_match = True
+            # Does either primary name match any of the alternate names of the other?
+            candidate1_alt_names_list = []
+            if positive_value_exists(candidate1_on_stage.google_civic_candidate_name):
+                if candidate1_on_stage.google_civic_candidate_name.strip().lower() not in candidate1_alt_names_list:
+                    candidate1_alt_names_list.append(candidate1_on_stage.google_civic_candidate_name.strip().lower())
+            if positive_value_exists(candidate1_on_stage.google_civic_candidate_name2):
+                if candidate1_on_stage.google_civic_candidate_name2.strip().lower() not in candidate1_alt_names_list:
+                    candidate1_alt_names_list.append(candidate1_on_stage.google_civic_candidate_name2.strip().lower())
+            if positive_value_exists(candidate1_on_stage.google_civic_candidate_name3):
+                if candidate1_on_stage.google_civic_candidate_name3.strip().lower() not in candidate1_alt_names_list:
+                    candidate1_alt_names_list.append(candidate1_on_stage.google_civic_candidate_name3.strip().lower())
+            candidate2_alt_names_list = []
+            if positive_value_exists(candidate2_on_stage.google_civic_candidate_name):
+                if candidate2_on_stage.google_civic_candidate_name.strip().lower() not in candidate2_alt_names_list:
+                    candidate2_alt_names_list.append(candidate2_on_stage.google_civic_candidate_name.strip().lower())
+            if positive_value_exists(candidate2_on_stage.google_civic_candidate_name2):
+                if candidate2_on_stage.google_civic_candidate_name2.strip().lower() not in candidate2_alt_names_list:
+                    candidate2_alt_names_list.append(candidate2_on_stage.google_civic_candidate_name2.strip().lower())
+            if positive_value_exists(candidate2_on_stage.google_civic_candidate_name3):
+                if candidate2_on_stage.google_civic_candidate_name3.strip().lower() not in candidate2_alt_names_list:
+                    candidate2_alt_names_list.append(candidate2_on_stage.google_civic_candidate_name3.strip().lower())
+            if candidate1_on_stage.candidate_name.strip().lower() in candidate2_alt_names_list:
+                candidate_name_matches_alt_name = True
+            if candidate2_on_stage.candidate_name.strip().lower() in candidate1_alt_names_list:
+                candidate_name_matches_alt_name = True
+        # Make sure they don't have different politicians
+        if positive_value_exists(candidate1_on_stage.politician_we_vote_id) and \
+                positive_value_exists(candidate2_on_stage.politician_we_vote_id):
+            if candidate1_on_stage.politician_we_vote_id != candidate2_on_stage.politician_we_vote_id:
+                each_candidate_has_different_politician = True
+        if (candidate_names_match or candidate_name_matches_alt_name) and not each_candidate_has_different_politician:
+            status += "IDENTICAL_CANDIDATE_NAMES_FROM_CTCL_FOUND_FOR_MERGE "
+            merge_results = merge_these_two_candidates(candidate1_we_vote_id, candidate2_we_vote_id, merge_choices)
+            if merge_results['candidates_merged']:
+                success = True
+                candidates_merged = True
+            else:
+                pass
+
     results = {
         'success':              success,
         'status':               status,
@@ -686,6 +738,7 @@ def merge_these_two_candidates(candidate1_we_vote_id, candidate2_we_vote_id, adm
     if candidate1_results['candidate_found']:
         candidate1_on_stage = candidate1_results['candidate']
         candidate1_id = candidate1_on_stage.id
+        candidate1_ctcl_uuid = candidate1_on_stage.ctcl_uuid
     else:
         results = {
             'success': False,
@@ -700,6 +753,7 @@ def merge_these_two_candidates(candidate1_we_vote_id, candidate2_we_vote_id, adm
     if candidate2_results['candidate_found']:
         candidate2_on_stage = candidate2_results['candidate']
         candidate2_id = candidate2_on_stage.id
+        candidate2_ctcl_uuid = candidate2_on_stage.ctcl_uuid
     else:
         results = {
             'success': False,
@@ -708,6 +762,29 @@ def merge_these_two_candidates(candidate1_we_vote_id, candidate2_we_vote_id, adm
             'candidate': None,
         }
         return results
+
+    # Merge CTCL UUIDs
+    from import_export_ctcl.controllers import merge_candidate_ctcl_uuids
+    try:
+        if 'ctcl_uuid' in admin_merge_choices:
+            new_master_ctcl_uuid = admin_merge_choices['ctcl_uuid']
+        elif positive_value_exists(candidate1_ctcl_uuid):
+            new_master_ctcl_uuid = candidate1_ctcl_uuid
+        elif positive_value_exists(candidate2_ctcl_uuid):
+            new_master_ctcl_uuid = candidate2_ctcl_uuid
+        else:
+            new_master_ctcl_uuid = None
+        if positive_value_exists(new_master_ctcl_uuid):
+            candidate1_on_stage.ctcl_uuid = new_master_ctcl_uuid
+            ctcl_results = merge_candidate_ctcl_uuids(
+                candidate1_ctcl_uuid=candidate1_ctcl_uuid,
+                candidate2_ctcl_uuid=candidate2_ctcl_uuid,
+                new_master_ctcl_uuid=new_master_ctcl_uuid)
+            status += ctcl_results['status']
+        else:
+            status += "COULD_NOT_MERGE_CTCL_UUIDS: No valid CTCL UUID found. "
+    except Exception as e:
+        status += "COULD_NOT_UPDATE_CTCL_UUIDS: " + str(e) + " "
 
     # TODO: Migrate images?
 
@@ -1852,7 +1929,7 @@ def generate_candidate_dict_from_candidate_object(
     # This should match voter_ballot_items_retrieve_for_one_election_for_api (voterBallotItemsRetrieve)
     date_last_updated = ''
     if positive_value_exists(candidate.date_last_updated):
-        date_last_updated = candidate.date_last_updated.strftime(DATE_FORMAT_YMD_HMS) # '%Y-%m-%d %H:%M:%S'
+        date_last_updated = candidate.date_last_updated.strftime(DATE_FORMAT_YMD_HMS)  # '%Y-%m-%d %H:%M:%S'
     date_today_as_integer = get_current_date_as_integer()
     try:
         election_is_upcoming = True if positive_value_exists(candidate.candidate_ultimate_election_date) and \

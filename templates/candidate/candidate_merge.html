@@ -17,6 +17,13 @@
 {% if candidate_option1 and candidate_option2 %}
 <table>
     <tr>
+        <td>
+          <a href="{% url 'candidate:candidate_list' %}">cancel</a>&nbsp; <input type="submit" value="Skip - Not Duplicates" name="skip" />&nbsp;
+        </td>
+        <td></td>
+        <td><input type="submit" value="Merge Candidates" name="merge" class="btn btn-primary" /></td>
+    </tr>
+    <tr>
         <th>&nbsp;</th>
         <th>Candidate Option 1</th>
         <th>Candidate Option 2</th>
@@ -104,18 +111,28 @@
             {% for candidate_to_office_link in candidate_option1_candidate_to_office_link_list %}
                 {{ candidate_to_office_link.election.election_name }}, {{ candidate_to_office_link.election.election_day_text }}
                 ({{ candidate_to_office_link.google_civic_election_id }}) --
+                {% if candidate_to_office_link.contest_office_we_vote_id %}
                 <a href="{% url 'office:office_summary_we_vote_id' candidate_to_office_link.contest_office_we_vote_id %}"
                    target="_blank">{{ candidate_to_office_link.office.office_name }} ({{ candidate_to_office_link.contest_office_we_vote_id }})
-                  <span class="glyphicon glyphicon-new-window"></span></a><br />
+                  <span class="glyphicon glyphicon-new-window"></span></a>
+                {% else %}
+                    Missing contest_office_we_vote_id
+                {% endif %}
+                <br />
             {% endfor %}
         </td>
         <td>
             {% for candidate_to_office_link in candidate_option2_candidate_to_office_link_list %}
                 {{ candidate_to_office_link.election.election_name }}, {{ candidate_to_office_link.election.election_day_text }}
                 ({{ candidate_to_office_link.google_civic_election_id }}) --
+                {% if candidate_to_office_link.contest_office_we_vote_id %}
                 <a href="{% url 'office:office_summary_we_vote_id' candidate_to_office_link.contest_office_we_vote_id %}"
                    target="_blank">{{ candidate_to_office_link.office.office_name }} ({{ candidate_to_office_link.contest_office_we_vote_id }})
-                  <span class="glyphicon glyphicon-new-window"></span></a><br />
+                  <span class="glyphicon glyphicon-new-window"></span></a>
+                {% else %}
+                    Missing contest_office_we_vote_id
+                {% endif %}
+                <br />
             {% endfor %}
         </td>
     </tr>

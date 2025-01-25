@@ -485,7 +485,14 @@
           <td><a href="{% url 'apis_v1:challengeParticipantRetrieveDocs' %}">challengeParticipantRetrieve</a></td>
           <td></td>
           <td>
-            Retrieve ChallengeParticipant entry.
+            Retrieve ChallengeParticipant entry (usually for one voter).
+          </td>
+        </tr>
+        <tr>
+          <td><a href="{% url 'apis_v1:challengeParticipantListRetrieveDocs' %}">challengeParticipantListRetrieve</a></td>
+          <td></td>
+          <td>
+            Retrieve list of ChallengeParticipant entries.
           </td>
         </tr>
         <tr>
@@ -495,7 +502,28 @@
             Create or update ChallengeNewsItem entry.
           </td>
         </tr>
-        
+        <tr>
+          <td><a href="{% url 'apis_v1:challengeInviteeSaveDocs' %}">challengeInviteeSave</a></td>
+          <td></td>
+          <td>
+            Create or update ChallengeInvitee entry.
+          </td>
+        </tr>
+        <tr>
+          <td><a href="{% url 'apis_v1:challengeInviteeRetrieveDocs' %}">challengeInviteeRetrieve</a></td>
+          <td></td>
+          <td>
+            Retrieve ChallengeInvitee entry (usually for one voter).
+          </td>
+        </tr>
+        <tr>
+          <td><a href="{% url 'apis_v1:challengeInviteeListRetrieveDocs' %}">challengeInviteeListRetrieve</a></td>
+          <td></td>
+          <td>
+            Retrieve list of ChallengeInvitee entries.
+          </td>
+        </tr>
+
         {###  ###}
         <tr>
           <td colspan="3"><strong>Elected Officials, Offices Held by a Politician &amp; Politicians</strong></td>
@@ -1218,6 +1246,12 @@
         {###  ###}
         <tr>
           <td colspan="3"><strong>For Developers</strong></td>
+        </tr>
+         <tr>
+          <td><a href="{% url 'apis_v1:backupOneTableToS3Docs' %}">backupOneTableToS3</a></td>
+          <td></td>
+          <td>Backup a Master server postgres table, and save it to AWS s3
+          </td>
         </tr>
          <tr>
           <td><a href="{% url 'apis_v1:fastLoadStatusRetrieve' %}">fastLoadStatusRetrieve</a></td>

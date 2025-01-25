@@ -2,8 +2,11 @@
 # Brought to you by We Vote. Be good.
 # -*- coding: UTF-8 -*-
 from challenge.controllers import challenge_list_retrieve_for_api, challenge_news_item_save_for_api, \
-    challenge_retrieve_for_api, challenge_save_for_api, \
-    challenge_participant_retrieve_for_api, challenge_participant_save_for_api
+    challenge_retrieve_for_api, challenge_save_for_api
+from challenge.controllers_invitee import challenge_invitee_retrieve_for_api, \
+    challenge_invitee_list_retrieve_for_api, challenge_invitee_save_for_api
+from challenge.controllers_participant import challenge_participant_retrieve_for_api, \
+    challenge_participant_list_retrieve_for_api, challenge_participant_save_for_api
 from config.base import get_environment_variable
 from django.http import HttpResponse
 from django.views.decorators.csrf import csrf_exempt
@@ -17,6 +20,59 @@ from wevote_functions.functions import get_voter_device_id, positive_value_exist
 logger = wevote_functions.admin.get_logger(__name__)
 
 WE_VOTE_SERVER_ROOT_URL = get_environment_variable("WE_VOTE_SERVER_ROOT_URL")
+
+
+def challenge_invitee_list_retrieve_view(request):  # challengeInviteeListRetrieve
+    voter_device_id = get_voter_device_id(request)  # We standardize how we take in the voter_device_id
+    challenge_we_vote_id = request.GET.get('challenge_we_vote_id', '')
+    json_data = challenge_invitee_list_retrieve_for_api(
+        voter_device_id=voter_device_id,
+        challenge_we_vote_id=challenge_we_vote_id,
+    )
+    return HttpResponse(json.dumps(json_data), content_type='application/json')
+
+
+def challenge_invitee_retrieve_view(request):  # challengeInviteeRetrieve
+    voter_device_id = get_voter_device_id(request)  # We standardize how we take in the voter_device_id
+    invitee_url_code = request.GET.get('invitee_url_code', '')
+    json_data = challenge_invitee_retrieve_for_api(
+        voter_device_id=voter_device_id,
+        invitee_url_code=invitee_url_code,
+    )
+    return HttpResponse(json.dumps(json_data), content_type='application/json')
+
+
+def challenge_invitee_save_view(request):  # challengeInviteeSave
+    voter_device_id = get_voter_device_id(request)  # We standardize how we take in the voter_device_id
+    challenge_we_vote_id = request.GET.get('challenge_we_vote_id', '')
+    destination_full_url = request.GET.get('destination_full_url', None)
+    google_civic_election_id = request.GET.get('google_civic_election_id', None)
+    invitee_id = request.GET.get('invitee_id', None)
+    invitee_name = request.GET.get('invitee_name', None)
+    invitee_name_changed = positive_value_exists(request.GET.get('invitee_name_changed', False))
+    invite_sent = positive_value_exists(request.GET.get('invite_sent', None))
+    invite_sent_changed = positive_value_exists(request.GET.get('invite_sent_changed', False))
+    invite_text_from_inviter = request.GET.get('invite_text_from_inviter', None)
+    invite_text_from_inviter_changed = \
+        positive_value_exists(request.GET.get('invite_text_from_inviter_changed', False))
+    invitee_url_code = request.GET.get('invitee_url_code', None)
+    invitee_url_code_changed = positive_value_exists(request.GET.get('invitee_url_code_changed', False))
+    json_data = challenge_invitee_save_for_api(
+        challenge_we_vote_id=challenge_we_vote_id,
+        destination_full_url=destination_full_url,
+        google_civic_election_id=google_civic_election_id,
+        invite_sent=invite_sent,
+        invite_sent_changed=invite_sent_changed,
+        invitee_id=invitee_id,
+        invitee_name=invitee_name,
+        invitee_name_changed=invitee_name_changed,
+        invite_text_from_inviter=invite_text_from_inviter,
+        invite_text_from_inviter_changed=invite_text_from_inviter_changed,
+        invitee_url_code=invitee_url_code,
+        invitee_url_code_changed=invitee_url_code_changed,
+        voter_device_id=voter_device_id,
+    )
+    return HttpResponse(json.dumps(json_data), content_type='application/json')
 
 
 def challenge_list_retrieve_view(request):  # challengeListRetrieve (No CDN)
@@ -74,12 +130,40 @@ def challenge_news_item_save_view(request):  # challengeNewsItemSave
     return HttpResponse(json.dumps(json_data), content_type='application/json')
 
 
+def challenge_participant_list_retrieve_view(request):  # challengeParticipantListRetrieve
+    voter_device_id = get_voter_device_id(request)  # We standardize how we take in the voter_device_id
+    challenge_we_vote_id = request.GET.get('challenge_we_vote_id', '')
+    json_data = challenge_participant_list_retrieve_for_api(
+        voter_device_id=voter_device_id,
+        challenge_we_vote_id=challenge_we_vote_id,
+    )
+    return HttpResponse(json.dumps(json_data), content_type='application/json')
+
+
 def challenge_participant_retrieve_view(request):  # challengeParticipantRetrieve
     voter_device_id = get_voter_device_id(request)  # We standardize how we take in the voter_device_id
     challenge_we_vote_id = request.GET.get('challenge_we_vote_id', '')
     json_data = challenge_participant_retrieve_for_api(
         voter_device_id=voter_device_id,
         challenge_we_vote_id=challenge_we_vote_id,
+    )
+    return HttpResponse(json.dumps(json_data), content_type='application/json')
+
+
+def challenge_participant_save_view(request):  # challengeParticipantSave
+    voter_device_id = get_voter_device_id(request)  # We standardize how we take in the voter_device_id
+    invite_text_for_friends = request.GET.get('invite_text_for_friends', '')
+    invite_text_for_friends_changed = positive_value_exists(request.GET.get('invite_text_for_friends_changed', False))
+    visible_to_public = positive_value_exists(request.GET.get('visible_to_public', True))
+    visible_to_public_changed = positive_value_exists(request.GET.get('visible_to_public_changed', False))
+    challenge_we_vote_id = request.GET.get('challenge_we_vote_id', '')
+    json_data = challenge_participant_save_for_api(
+        challenge_we_vote_id=challenge_we_vote_id,
+        invite_text_for_friends=invite_text_for_friends,
+        invite_text_for_friends_changed=invite_text_for_friends_changed,
+        visible_to_public=visible_to_public,
+        visible_to_public_changed=visible_to_public_changed,
+        voter_device_id=voter_device_id,
     )
     return HttpResponse(json.dumps(json_data), content_type='application/json')
 
@@ -114,11 +198,19 @@ def challenge_retrieve_as_owner_view(request):  # challengeRetrieveAsOwner (No C
 
 
 @csrf_exempt
-def challenge_save_view(request):  # challengeSave & challengeStartSave
+def challenge_start_save_view(request):  # challengeStartSave
+    return challenge_save_view(request, is_start_save=True)
+
+
+@csrf_exempt
+def challenge_save_view(request, is_start_save=False):  # challengeSave & challengeStartSave
     # This is set in /config/base.py: DATA_UPLOAD_MAX_MEMORY_SIZE = 6000000
     voter_device_id = get_voter_device_id(request)  # We standardize how we take in the voter_device_id
     challenge_description = request.POST.get('challenge_description', '')
     challenge_description_changed = positive_value_exists(request.POST.get('challenge_description_changed', False))
+    challenge_invite_text_default = request.POST.get('challenge_invite_text_default', '')
+    challenge_invite_text_default_changed = \
+        positive_value_exists(request.POST.get('challenge_invite_text_default_changed', False))
     in_draft_mode = positive_value_exists(request.POST.get('in_draft_mode', True))
     in_draft_mode_changed = positive_value_exists(request.POST.get('in_draft_mode_changed', False))
     challenge_photo_from_file_reader = request.POST.get('challenge_photo_from_file_reader', '')
@@ -126,6 +218,10 @@ def challenge_save_view(request):  # challengeSave & challengeStartSave
     challenge_photo_delete = request.POST.get('challenge_photo_delete', '')
     challenge_photo_delete_changed = positive_value_exists(request.POST.get('challenge_photo_delete_changed', False))
     challenge_title = request.POST.get('challenge_title', '')
+    try:
+        challenge_title = challenge_title.strip()
+    except Exception as e:
+        pass
     challenge_title_changed = positive_value_exists(request.POST.get('challenge_title_changed', False))
     challenge_we_vote_id = request.POST.get('challenge_we_vote_id', '')
     hostname = request.POST.get('hostname', '')
@@ -135,8 +231,11 @@ def challenge_save_view(request):  # challengeSave & challengeStartSave
     json_data = challenge_save_for_api(
         challenge_description=challenge_description,
         challenge_description_changed=challenge_description_changed,
+        challenge_invite_text_default=challenge_invite_text_default,
+        challenge_invite_text_default_changed=challenge_invite_text_default_changed,
         in_draft_mode=in_draft_mode,
         in_draft_mode_changed=in_draft_mode_changed,
+        is_start_save=is_start_save,
         challenge_photo_from_file_reader=challenge_photo_from_file_reader,
         challenge_photo_changed=challenge_photo_changed,
         challenge_photo_delete=challenge_photo_delete,
@@ -149,20 +248,6 @@ def challenge_save_view(request):  # challengeSave & challengeStartSave
         politician_starter_list_serialized=politician_starter_list_serialized,
         politician_starter_list_changed=politician_starter_list_changed,
         request=request,
-        voter_device_id=voter_device_id,
-    )
-    return HttpResponse(json.dumps(json_data), content_type='application/json')
-
-
-def challenge_participant_save_view(request):  # challengeParticipantSave
-    voter_device_id = get_voter_device_id(request)  # We standardize how we take in the voter_device_id
-    visible_to_public = positive_value_exists(request.GET.get('visible_to_public', True))
-    visible_to_public_changed = positive_value_exists(request.GET.get('visible_to_public_changed', False))
-    challenge_we_vote_id = request.GET.get('challenge_we_vote_id', '')
-    json_data = challenge_participant_save_for_api(
-        challenge_we_vote_id=challenge_we_vote_id,
-        visible_to_public=visible_to_public,
-        visible_to_public_changed=visible_to_public_changed,
         voter_device_id=voter_device_id,
     )
     return HttpResponse(json.dumps(json_data), content_type='application/json')

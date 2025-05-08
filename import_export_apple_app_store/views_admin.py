@@ -1,4 +1,4 @@
-# import_export_google_play_store/views_admin.py
+# import_export_apple_app_store/views_admin.py
 # Brought to you by We Vote. Be good.
 # -*- coding: UTF-8 -*-
 
@@ -34,7 +34,7 @@ logger = wevote_functions.admin.get_logger(__name__)
 
 
 @login_required
-def google_play_store_test_view(request):
+def apple_app_store_test_view(request):
     """
     Provide an index of import/export actions (for We Vote data maintenance)
     """
@@ -72,11 +72,11 @@ def google_play_store_test_view(request):
     template_values = {
         'messages_on_stage':    messages_on_stage,
     }
-    return render(request, 'import_export_google_play_store/index.html', template_values)
+    return render(request, 'import_export_apple_app_store/index.html', template_values)
 
 
 @login_required
-def import_export_google_play_store_index_view(request):
+def import_export_apple_app_store_index_view(request):
     """
     Provide an index of import/export actions (for We Vote data maintenance)
     """
@@ -85,11 +85,11 @@ def import_export_google_play_store_index_view(request):
     template_values = {
         'messages_on_stage':    messages_on_stage,
     }
-    return render(request, 'import_export_google_play_store/index.html', template_values)
+    return render(request, 'import_export_apple_app_store/index.html', template_values)
 
 
 @login_required
-def google_play_store_event_list_view(request):
+def apple_app_store_event_list_view(request):
     # admin, analytics_admin, partner_organization, political_data_manager, political_data_viewer, verified_volunteer
     authority_required = {'admin', 'analytics_admin'}
     if not voter_has_authority(request, authority_required):
@@ -98,7 +98,7 @@ def google_play_store_event_list_view(request):
     google_civic_election_id = convert_to_int(request.GET.get('google_civic_election_id', 0))
     messages_on_stage = get_messages(request)
     missing_politician = positive_value_exists(request.GET.get('missing_politician', False))
-    google_play_store_event_search = request.GET.get('google_play_store_event_search', '')
+    apple_app_store_event_search = request.GET.get('apple_app_store_event_search', '')
     show_all = positive_value_exists(request.GET.get('show_all', False))
     show_battleground = positive_value_exists(request.GET.get('show_battleground', False))
     show_this_year = convert_to_int(request.GET.get('show_this_year', 9999))
@@ -116,8 +116,8 @@ def google_play_store_event_list_view(request):
     # Maintenance script section END
     # ################################################
 
-    google_play_store_event_count = 0
-    google_play_store_event_list = []
+    apple_app_store_event_count = 0
+    apple_app_store_event_list = []
     state_list = STATE_CODE_MAP
     sorted_state_list = sorted(state_list.items())
 
@@ -199,26 +199,26 @@ def google_play_store_event_list_view(request):
         #
         #             queryset = queryset.filter(final_filters)
 
-        # google_play_store_event_count = queryset.count()
+        # apple_app_store_event_count = queryset.count()
         # if positive_value_exists(show_all):
-        #     google_play_store_event_list = list(queryset[:1000])
+        #     apple_app_store_event_list = list(queryset[:1000])
         # else:
-        #     google_play_store_event_list = list(queryset[:200])
+        #     apple_app_store_event_list = list(queryset[:200])
     except ObjectDoesNotExist:
         # This is fine
         pass
 
-    if positive_value_exists(google_play_store_event_count):
+    if positive_value_exists(apple_app_store_event_count):
         messages.add_message(request, messages.INFO,
-                             "{google_play_store_event_count:,} google_play_store_events found."
-                             "".format(google_play_store_event_count=google_play_store_event_count))
+                             "{apple_app_store_event_count:,} apple_app_store_events found."
+                             "".format(apple_app_store_event_count=apple_app_store_event_count))
 
     template_values = {
         'messages_on_stage':                messages_on_stage,
         'missing_politician':               missing_politician,
         'google_civic_election_id':         google_civic_election_id,
-        'google_play_store_event_list':            google_play_store_event_list,
-        'google_play_store_event_search':          google_play_store_event_search,
+        'apple_app_store_event_list':            apple_app_store_event_list,
+        'apple_app_store_event_search':          apple_app_store_event_search,
         'show_all':                         show_all,
         'show_battleground':                show_battleground,
         'show_this_year':                   show_this_year,
@@ -227,4 +227,4 @@ def google_play_store_event_list_view(request):
         'state_list':                       sorted_state_list,
         'years_available':                  OFFICE_HELD_YEARS_AVAILABLE,
     }
-    return render(request, 'import_export_google_play_store/google_play_store_event_list.html', template_values)
+    return render(request, 'import_export_apple_app_store/apple_app_store_event_list.html', template_values)

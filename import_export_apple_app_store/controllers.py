@@ -1,4 +1,4 @@
-# import_export_google_play_store/controllers.py
+# import_export_apple_app_store/controllers.py
 # Brought to you by We Vote. Be good.
 # -*- coding: UTF-8 -*-
 
@@ -17,7 +17,7 @@ OPENREPLAY_BASE_URL = get_environment_variable("OPENREPLAY_BASE_URL", no_excepti
 OPENREPLAY_PROJECT_KEY = get_environment_variable("OPENREPLAY_PROJECT_KEY", no_exception=True)
 OPENREPLAY_ORGANIZATION_KEY = get_environment_variable("OPENREPLAY_ORGANIZATION_KEY", no_exception=True)
 # Replace with the path to your service account key file
-SERVICE_ACCOUNT_FILE = '/Users/dalemcgrew/PycharmProjects/WeVoteServer/import_export_google_play_store/we-vote-ballot-fb222cde2c46.json'
+SERVICE_ACCOUNT_FILE = '/Users/dalemcgrew/PycharmProjects/WeVoteServer/import_export_apple_app_store/we-vote-ballot-fb222cde2c46.json'
 SCOPES = ['https://www.googleapis.com/auth/playdeveloperreporting']
 
 

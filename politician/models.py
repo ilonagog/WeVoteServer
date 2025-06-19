@@ -331,6 +331,8 @@ class Politician(models.Model):
     politician_email3 = models.CharField(max_length=255, null=True, unique=False)
     # The date of the last election this candidate relates to, converted to integer, ex/ 20201103
     politician_ultimate_election_date = models.PositiveIntegerField(default=None, null=True)
+    bluesky_handle = models.TextField(blank=True, null=True)
+    tiktok_url = models.TextField(blank=True, null=True)
     twitter_name = models.CharField(
         verbose_name="politician plain text name from twitter", max_length=255, null=True, blank=True)
     twitter_location = models.CharField(
@@ -533,6 +535,8 @@ class PoliticianChangeLog(models.Model):
     # are set, so we can show the changed_by_voter_we_vote_id who collected the data.
     is_ballotpedia_added = models.BooleanField(db_index=True, default=None, null=True)  # New Ballotpedia link
     is_ballotpedia_removed = models.BooleanField(db_index=True, default=None, null=True)
+    is_bluesky_added = models.BooleanField(db_index=True, default=None, null=True)
+    is_bluesky_removed = models.BooleanField(db_index=True, default=None, null=True)
     is_facebook_added = models.BooleanField(db_index=True, default=None, null=True)  # New Facebook account added
     is_facebook_removed = models.BooleanField(db_index=True, default=None, null=True)
     is_from_twitter = models.BooleanField(db_index=True, default=None, null=True)  # Error retrieving from Twitter
@@ -545,6 +549,8 @@ class PoliticianChangeLog(models.Model):
     is_politician_analysis_done = models.BooleanField(db_index=True, default=None, null=True)  # Analysis complete
     is_politician_url_added = models.BooleanField(db_index=True, default=None, null=True)  # New Ballotpedia link
     is_politician_url_removed = models.BooleanField(db_index=True, default=None, null=True)
+    is_tiktok_added = models.BooleanField(db_index=True, default=None, null=True)
+    is_tiktok_removed = models.BooleanField(db_index=True, default=None, null=True)
     is_twitter_handle_added = models.BooleanField(db_index=True, default=None, null=True)  # New Twitter handle saved
     is_twitter_handle_removed = models.BooleanField(db_index=True, default=None, null=True)
     is_website_added = models.BooleanField(db_index=True, default=None, null=True)  # New Website link added
@@ -2607,17 +2613,24 @@ class PoliticianManager(models.Manager):
             politician.profile_image_type_currently_active = PROFILE_IMAGE_TYPE_TWITTER
             values_changed = True
         if politician.profile_image_type_currently_active == PROFILE_IMAGE_TYPE_TWITTER:
-            if twitter_user.we_vote_hosted_profile_image_url_large != politician.we_vote_hosted_profile_image_url_large:
-                politician.we_vote_hosted_profile_image_url_large = twitter_user.we_vote_hosted_profile_image_url_large
-                values_changed = True
-            if twitter_user.we_vote_hosted_profile_image_url_medium != \
-                    politician.we_vote_hosted_profile_image_url_medium:
-                politician.we_vote_hosted_profile_image_url_medium = \
-                    twitter_user.we_vote_hosted_profile_image_url_medium
-                values_changed = True
-            if twitter_user.we_vote_hosted_profile_image_url_tiny != politician.we_vote_hosted_profile_image_url_tiny:
-                politician.we_vote_hosted_profile_image_url_tiny = twitter_user.we_vote_hosted_profile_image_url_tiny
-                values_changed = True
+            if positive_value_exists(twitter_user.we_vote_hosted_profile_image_url_large):
+                if twitter_user.we_vote_hosted_profile_image_url_large != \
+                        politician.we_vote_hosted_profile_image_url_large:
+                    politician.we_vote_hosted_profile_image_url_large = \
+                        twitter_user.we_vote_hosted_profile_image_url_large
+                    values_changed = True
+            if positive_value_exists(twitter_user.we_vote_hosted_profile_image_url_medium):
+                if twitter_user.we_vote_hosted_profile_image_url_medium != \
+                        politician.we_vote_hosted_profile_image_url_medium:
+                    politician.we_vote_hosted_profile_image_url_medium = \
+                        twitter_user.we_vote_hosted_profile_image_url_medium
+                    values_changed = True
+            if positive_value_exists(twitter_user.we_vote_hosted_profile_image_url_tiny):
+                if twitter_user.we_vote_hosted_profile_image_url_tiny != \
+                        politician.we_vote_hosted_profile_image_url_tiny:
+                    politician.we_vote_hosted_profile_image_url_tiny = \
+                        twitter_user.we_vote_hosted_profile_image_url_tiny
+                    values_changed = True
 
         if values_changed:
             try:

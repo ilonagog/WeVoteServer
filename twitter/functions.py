@@ -39,29 +39,20 @@ TWITTER_USER_SUSPENDED_LOG_RESPONSES = [
 def convert_twitter_user_object_data_to_we_vote_dict(twitter_user_data):
     if twitter_user_data is None:
         twitter_user_data = {}
+    profile_image_url_raw = twitter_user_data['profile_image_url'] if 'profile_image_url' in twitter_user_data else ''
+    profile_image_url = profile_image_url_raw.replace('_normal', '')  # Retrieve full size image
     twitter_dict = {
-        'description': twitter_user_data['description']
-        if 'description' in twitter_user_data else '',
-        'entities': twitter_user_data['entities']
-        if 'entities' in twitter_user_data else '',
-        'id': twitter_user_data['id']
-        if 'id' in twitter_user_data else '',
-        'location': twitter_user_data['location']
-        if 'location' in twitter_user_data else '',
-        'name': twitter_user_data['name']
-        if 'name' in twitter_user_data else '',
-        'profile_image_url': twitter_user_data['profile_image_url']
-        if 'profile_image_url' in twitter_user_data else '',
-        'public_metrics': twitter_user_data['public_metrics']
-        if 'public_metrics' in twitter_user_data else '',
-        'username': twitter_user_data['username']
-        if 'username' in twitter_user_data else '',
-        'verified': twitter_user_data['verified']
-        if 'verified' in twitter_user_data else '',
-        'verified_type': twitter_user_data['verified_type']
-        if 'verified_type' in twitter_user_data else '',
-        'withheld': twitter_user_data['withheld']
-        if 'withheld' in twitter_user_data else '',
+        'description': twitter_user_data['description'] if 'description' in twitter_user_data else '',
+        'entities': twitter_user_data['entities'] if 'entities' in twitter_user_data else '',
+        'id': twitter_user_data['id'] if 'id' in twitter_user_data else '',
+        'location': twitter_user_data['location'] if 'location' in twitter_user_data else '',
+        'name': twitter_user_data['name'] if 'name' in twitter_user_data else '',
+        'profile_image_url': profile_image_url,
+        'public_metrics': twitter_user_data['public_metrics'] if 'public_metrics' in twitter_user_data else '',
+        'username': twitter_user_data['username'] if 'username' in twitter_user_data else '',
+        'verified': twitter_user_data['verified'] if 'verified' in twitter_user_data else '',
+        'verified_type': twitter_user_data['verified_type'] if 'verified_type' in twitter_user_data else '',
+        'withheld': twitter_user_data['withheld'] if 'withheld' in twitter_user_data else '',
     }
     return twitter_dict
 
@@ -244,6 +235,7 @@ def retrieve_twitter_user_info(twitter_user_id=0, twitter_handle='', twitter_api
                 twitter_handle_found = positive_value_exists(twitter_user_id)
             except Exception as e:
                 status += 'TWITTER_DICT_DATA_NOT_FOUND-' + str(e) + " "
+                success = False
                 twitter_dict = {
                     'twitter_handle_updates_failing': True,
                     'username': twitter_handle,
@@ -251,7 +243,6 @@ def retrieve_twitter_user_info(twitter_user_id=0, twitter_handle='', twitter_api
                 twitter_user_id = 0
                 twitter_handle_found = False
                 twitter_user_not_found_in_twitter = True
-            success = True
             # status += 'TWITTER_HANDLE_SUCCESS-' + str(twitter_handle) + " "
         elif positive_value_exists(twitter_user_id):
             # Use Twitter API call counter to track the number of queries we are doing each day
@@ -276,6 +267,7 @@ def retrieve_twitter_user_info(twitter_user_id=0, twitter_handle='', twitter_api
             except Exception as e:
                 logger.error('retrieve_twitter_user_info create_detailed_counter_entry threw %s', str(e))
                 counter = None
+                success = False
             try:
                 twitter_user = client.get_user(id=twitter_user_id)
                 twitter_dict = convert_twitter_user_object_data_to_we_vote_dict(twitter_user.data)
@@ -284,11 +276,11 @@ def retrieve_twitter_user_info(twitter_user_id=0, twitter_handle='', twitter_api
                 twitter_handle_found = True
             except Exception as e:
                 status += 'TWITTER_JSON_DATA_NOT_FOUND_FROM_ID-' + str(e) + " "
+                success = False
                 twitter_dict = {}
+                twitter_handle_found = False
                 twitter_user_id = 0
-            success = True
             # status += 'TWITTER_USER_ID_SUCCESS-' + str(twitter_user_id) + " "
-            twitter_handle_found = True
         else:
             twitter_dict = {}
             success = False

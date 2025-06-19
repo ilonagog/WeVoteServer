@@ -1173,8 +1173,8 @@ class OrganizationManager(models.Manager):
                     pass
         return organization
 
+    @staticmethod
     def save_fresh_twitter_details_to_organization(
-            self,
             organization=None,
             organization_we_vote_id='',
             twitter_user=None):
@@ -1304,21 +1304,25 @@ class OrganizationManager(models.Manager):
             organization.profile_image_type_currently_active = PROFILE_IMAGE_TYPE_TWITTER
             values_changed = True
         if organization.profile_image_type_currently_active == PROFILE_IMAGE_TYPE_TWITTER:
-            if twitter_user.we_vote_hosted_profile_image_url_large != \
-                    organization.we_vote_hosted_profile_image_url_large:
-                organization.we_vote_hosted_profile_image_url_large = \
-                    twitter_user.we_vote_hosted_profile_image_url_large
-                values_changed = True
-            if twitter_user.we_vote_hosted_profile_image_url_medium != \
-                    organization.we_vote_hosted_profile_image_url_medium:
-                organization.we_vote_hosted_profile_image_url_medium = \
-                    twitter_user.we_vote_hosted_profile_image_url_medium
-                values_changed = True
-            if twitter_user.we_vote_hosted_profile_image_url_tiny != \
-                    organization.we_vote_hosted_profile_image_url_tiny:
-                organization.we_vote_hosted_profile_image_url_tiny = \
-                    twitter_user.we_vote_hosted_profile_image_url_tiny
-                values_changed = True
+            if positive_value_exists(twitter_user.we_vote_hosted_profile_image_url_large):
+                # Only update organization if there is a new image coming in.
+                if twitter_user.we_vote_hosted_profile_image_url_large != \
+                        organization.we_vote_hosted_profile_image_url_large:
+                    organization.we_vote_hosted_profile_image_url_large = \
+                        twitter_user.we_vote_hosted_profile_image_url_large
+                    values_changed = True
+            if positive_value_exists(twitter_user.we_vote_hosted_profile_image_url_medium):
+                if twitter_user.we_vote_hosted_profile_image_url_medium != \
+                        organization.we_vote_hosted_profile_image_url_medium:
+                    organization.we_vote_hosted_profile_image_url_medium = \
+                        twitter_user.we_vote_hosted_profile_image_url_medium
+                    values_changed = True
+            if positive_value_exists(twitter_user.we_vote_hosted_profile_image_url_tiny):
+                if twitter_user.we_vote_hosted_profile_image_url_tiny != \
+                        organization.we_vote_hosted_profile_image_url_tiny:
+                    organization.we_vote_hosted_profile_image_url_tiny = \
+                        twitter_user.we_vote_hosted_profile_image_url_tiny
+                    values_changed = True
 
         if values_changed:
             try:
@@ -2839,8 +2843,7 @@ class OrganizationListManager(models.Manager):
             return results
 
         if not len(organization_ids_followed_by_voter):
-            status += 'NO_ORGANIZATIONS_FOUND_NO_ORGANIZATIONS_IN_LIST '
-            success = False
+            status += 'NO_ORGANIZATIONS_FOUND_BY_ID_NO_ORGANIZATIONS_IN_LIST '
             results = {
                 'success':                      success,
                 'status':                       status,
@@ -3208,11 +3211,12 @@ class OrganizationListManager(models.Manager):
     @staticmethod
     def retrieve_organizations_by_organization_we_vote_id_list(
             list_of_organization_we_vote_ids=[],
-            limit=200,
+            limit=100,
             read_only=True):
         organization_list = []
         organization_list_found = False
         status = ''
+        success = True
 
         if not type(list_of_organization_we_vote_ids) is list:
             status += 'NO_ORGANIZATIONS_FOUND_MISSING_ORGANIZATION_LIST '
@@ -3227,7 +3231,6 @@ class OrganizationListManager(models.Manager):
 
         if not len(list_of_organization_we_vote_ids):
             status += 'NO_ORGANIZATIONS_FOUND_NO_ORGANIZATIONS_IN_LIST '
-            success = False
             results = {
                 'success':                      success,
                 'status':                       status,
@@ -3244,9 +3247,10 @@ class OrganizationListManager(models.Manager):
             organization_queryset = organization_queryset.filter(
                 we_vote_id__in=list_of_organization_we_vote_ids)
             organization_queryset = organization_queryset.order_by('-twitter_followers_count')
+            organization_followers_count = organization_queryset.count()
             if positive_value_exists(limit):
                 organization_queryset = organization_queryset[:limit]
-            organization_list = organization_queryset
+            organization_list = list(organization_queryset)
 
             if len(organization_list):
                 organization_list_found = True
@@ -3309,6 +3313,8 @@ class Organization(models.Model):
     # This is the master linkage, and we keep a copy in the Politician record too.
     politician_we_vote_id = models.CharField(max_length=255, null=True, blank=True)
 
+    bluesky_handle = models.TextField(blank=True, null=True)
+
     # Facebook session information
     facebook_id = models.BigIntegerField(verbose_name="facebook big integer id", null=True, blank=True)
     facebook_email = models.EmailField(verbose_name='facebook email address', max_length=255, unique=False,
@@ -3322,6 +3328,8 @@ class Organization(models.Model):
     facebook_photo_url = models.TextField(blank=True, null=True)
     facebook_photo_url_is_placeholder = models.BooleanField(default=False)
     facebook_url_is_broken = models.BooleanField(default=False)
+
+    tiktok_url = models.TextField(blank=True, null=True)
 
     # Twitter information
     twitter_user_id = models.BigIntegerField(verbose_name="twitter id", null=True, blank=True)
@@ -3393,9 +3401,13 @@ class Organization(models.Model):
     ballotpedia_photo_url = models.TextField(
         verbose_name='url of ballotpedia logo', blank=True, null=True)
 
+    augmentation_done = models.BooleanField(default=False)
+    help_needed = models.BooleanField(default=False)
     issue_analysis_done = models.BooleanField(default=False)
     issue_analysis_admin_notes = models.TextField(verbose_name="we vote admin notes", null=True, blank=True)
+    qa_done = models.BooleanField(default=False)
 
+    organization_defunct = models.BooleanField(default=False)
     organization_type = models.CharField(
         verbose_name="type of org", max_length=2, choices=ORGANIZATION_TYPE_CHOICES, default=UNKNOWN)
     date_last_changed = models.DateTimeField(null=True, auto_now=True)

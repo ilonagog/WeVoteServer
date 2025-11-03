@@ -149,6 +149,14 @@
         <label for="regenerate_color_id">&nbsp;Regenerate default color</label>
        {#  <label>Regenerate default color &#40;different algorithm&#41;  &nbsp;</label><input name="regenerate_color_edge_case" type="checkbox"/> #}
     </div>
+    <div class="col">
+        <label class="pl-4 control-label">Passkey:</label>
+        <span style="font-weight: bold; font-size: 2em;">
+            {{ linked_campaignx_passkey }}
+        </span>
+        <br />
+        (so Politician can claim profile)
+    </div>
 </div>
 </div>
 {% endif %}
@@ -285,7 +293,10 @@
         <label for="twitter_handle_updates_failing_id" style="font-weight: normal !important;">Twitter Handle Updates Failing{% if politician.twitter_handle_updates_failing %}. <span style="color: darkgray">Our automated Twitter data update script had trouble retrieving this handle. Uncheck when fixed.</span>{% endif %}</label><br />
         <a href="https://twitter.com/{{ politician.politician_twitter_handle|iriencode }}"
            target="_blank">View on Twitter <span class="glyphicon glyphicon-new-window"></span></a>&nbsp;&nbsp;&nbsp;
-        <a href="{% url 'import_export_twitter:refresh_twitter_politician_details' politician.id %}">Refresh Twitter Details</a><br />
+        {% if TWITTER_API_ON %}
+            <a href="{% url 'import_export_twitter:refresh_twitter_politician_details' politician.id %}">Refresh Twitter Details</a>
+        {% endif %}
+        <br />
         Twitter Name: {{ politician.twitter_name }}<br />
         Twitter Description: {{ politician.twitter_description }}<br />
         Twitter Location: {{ politician.twitter_location }}<br />
@@ -358,6 +369,13 @@
     </div>
 </div>
 </div>
+</div>
+
+<div class="pb-3 row">
+    <label for="politician_urltest_id" class="pl-4 control-label">
+        Test Politician Website's/URL's 
+        <a href="{% url 'politician:politician_url_testing' %}?politician_we_vote_id={{ politician.we_vote_id }}&politician_id={{ politician.id }}" target="_blank"><span class="glyphicon glyphicon-new-window"></span></a>
+    </label>
 </div>
 
 <div class="row">

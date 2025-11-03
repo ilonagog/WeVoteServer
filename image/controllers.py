@@ -109,6 +109,8 @@ except Exception:
     SOCIAL_BACKGROUND_IMAGE_HEIGHT = 200    # HTML x
     SOCIAL_BACKGROUND_IMAGE_WIDTH = 900     # HTML y
 
+TWITTER_API_ON = positive_value_exists(get_environment_variable("TWITTER_API_ON", no_exception=True))
+
 log_time = False
 
 
@@ -4915,8 +4917,9 @@ def organize_object_photo_fields_based_on_image_type_currently_active(
             object_with_photo_fields.profile_image_type_currently_active = PROFILE_IMAGE_TYPE_VOTE_USA
             save_changes = True
     # Now move selected field into master politician image
-    if uploaded_image_exists and \
-            object_with_photo_fields.profile_image_type_currently_active == PROFILE_IMAGE_TYPE_UPLOADED:
+    if object_with_photo_fields.profile_image_type_currently_active == PROFILE_IMAGE_TYPE_UPLOADED:
+        # We don't require 'uploaded_image_exists' to be here because we want to be able to remove
+        #  the politician's profile image if the uploaded image is removed
         results = change_default_profile_image_if_needed(
             object_with_photo_fields=object_with_photo_fields,
             new_profile_image_key='we_vote_hosted_profile_uploaded_image_url')

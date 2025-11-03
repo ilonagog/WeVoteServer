@@ -4,12 +4,13 @@
 
 from django.urls import re_path
 
-from . import views_admin
+from . import views_admin, views_data_cleaning
 
 urlpatterns = [
     re_path(r'^$', views_admin.politician_list_view, name='politician_list',),
     re_path(r'^compare_two_politicians/$',
             views_admin.compare_two_politicians_for_merge_view, name='compare_two_politicians_for_merge'),
+    re_path(r'^data_cleaning/$', views_data_cleaning.politicians_data_cleaning_view, name='politicians_data_cleaning'),
     re_path(r'^find_duplicate_politicians/$',
             views_admin.find_and_merge_duplicate_politicians_view, name='find_and_merge_duplicate_politicians'),
     re_path(r'^edit_process/$', views_admin.politician_edit_process_view, name='politician_edit_process'),
@@ -44,6 +45,8 @@ urlpatterns = [
     re_path(r'^update_profile_image_background_color/',
             views_admin.update_profile_image_background_color_view_for_politicians,
             name='update_profile_image_background_color'),
+    re_path(r'^politician_url_test/$',
+            views_admin.politician_url_test_view, name='politician_url_testing'),
     # 2024-05-15: Causing problems on live servers
     # re_path(r'^update_recommended_politicians/', views_admin.update_recommended_politicians_view,
     #         name='update_recommended_politicians')

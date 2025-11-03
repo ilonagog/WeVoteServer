@@ -1,0 +1,39 @@
+FROM public.ecr.aws/docker/library/python:3.12-slim-bookworm
+
+# install required software
+RUN export DEBIAN_FRONTEND=noninteractive && \
+    apt update && apt install -y \
+    postgresql-client libmagic1
+# libcairo2 is failing currently, so commenting it out for now
+#    libcairo2 postgresql-client libmagic1
+
+# install python dependencies
+COPY requirements.txt /tmp
+RUN pip install -r /tmp/requirements.txt --no-cache-dir
+RUN pip install newrelic
+
+# copy entrypoint script
+COPY docker/prod/entrypoint /usr/local/bin/docker-entrypoint
+
+# COPY database migration script
+COPY docker/prod/run-db-migration /usr/local/bin/run-db-migration
+
+# setup user and create required directories
+RUN useradd wevote && mkdir -p /var/log/wevote /wevote && chown wevote:wevote /var/log/wevote /wevote
+
+# copy all repo files to container
+COPY . /wevote/code
+
+# create migrations directories
+RUN for d in `find /wevote/code -name models.py -exec dirname {} \;`; do \
+    mkdir -p $d/migrations && chown wevote:wevote $d/migrations; \
+done
+
+# define docker runtime
+WORKDIR /wevote/code
+USER wevote
+EXPOSE 8000
+
+ENTRYPOINT ["docker-entrypoint"]
+CMD ["newrelic-admin", "run-program", "gunicorn", "--workers", "3", "--worker-class", "gthread", "--timeout", "1800", "--bind", "0.0.0.0:8000", "config.wsgi"]
+

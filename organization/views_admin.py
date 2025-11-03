@@ -2,15 +2,16 @@
 # Brought to you by We Vote. Be good.
 # -*- coding: UTF-8 -*-
 
-from .controllers import full_domain_string_available, merge_these_two_organizations,\
+from .controllers import full_domain_string_available, merge_these_two_organizations, \
     move_organization_followers_to_another_organization, move_organization_membership_link_to_another_organization, \
     move_organization_team_member_entries_to_another_organization, organizations_import_from_master_server, \
-    organization_politician_match, push_organization_data_to_other_table_caches, subdomain_string_available, find_duplicate_organization
+    organization_politician_match, push_organization_data_to_other_table_caches, subdomain_string_available, \
+    find_duplicate_organization, merge_if_duplicate_organizations
 from .controllers_fastly import add_wevote_subdomain_to_fastly, add_subdomain_route53_record, \
     get_wevote_subdomain_status
 from .models import GROUP, INDIVIDUAL, Organization, OrganizationChangeLog, OrganizationReservedDomain, \
     OrganizationTeamMember, ORGANIZATION_UNIQUE_IDENTIFIERS, ORGANIZATION_UNIQUE_ATTRIBUTES_TO_BE_CLEARED, \
-    OrganizationsArePossibleDuplicates, PUBLIC_FIGURE
+    OrganizationsArePossibleDuplicates, PUBLIC_FIGURE, OrganizationManager
 from base64 import b64encode
 from admin_tools.views import redirect_to_sign_in_page
 from campaign.controllers import move_campaignx_to_another_organization
@@ -18,7 +19,7 @@ from campaign.models import CampaignXListedByOrganization, CampaignXManager
 from candidate.models import CandidateCampaign, CandidateListManager, CandidateManager, \
     PROFILE_IMAGE_TYPE_UNKNOWN, PROFILE_IMAGE_TYPE_UPLOADED
 from volunteer_task.models import VOLUNTEER_ACTION_DUPLICATE_POLITICIAN_ANALYSIS, \
-    VOLUNTEER_ACTION_POLITICIAN_DEDUPLICATION, VolunteerTaskManager, VOLUNTEER_ACTION_ORGANIZATION_AUGMENTATION, \
+    VolunteerTaskManager, VOLUNTEER_ACTION_ORGANIZATION_AUGMENTATION, \
     VOLUNTEER_ACTION_ORGANIZATION_DEDUPLICATION
 from config.base import get_environment_variable
 from datetime import datetime
@@ -32,7 +33,7 @@ from django.shortcuts import render
 from django.core.exceptions import ObjectDoesNotExist
 # TODO: July 2021: donate.models has been abandoned, this is still in place to allow the app to compile.
 from donate.models import MasterFeaturePackage
-from exception.models import handle_record_found_more_than_one_exception,\
+from exception.models import handle_record_found_more_than_one_exception, \
     handle_record_not_deleted_exception, handle_record_not_found_exception
 from election.controllers import retrieve_election_id_list_by_year_list, retrieve_upcoming_election_id_list
 from election.models import Election, ElectionManager
@@ -67,51 +68,10 @@ ORGANIZATION_STANCE_CHOICES = (
     (STILL_DECIDING,    'We Are Still Deciding Our Stance'),
 )
 ORGANIZATIONS_SYNC_URL = get_environment_variable("ORGANIZATIONS_SYNC_URL")  # organizationsSyncOut
+TWITTER_API_ON = positive_value_exists(get_environment_variable("TWITTER_API_ON", no_exception=True))
 WE_VOTE_SERVER_ROOT_URL = get_environment_variable("WE_VOTE_SERVER_ROOT_URL")
 
 logger = wevote_functions.admin.get_logger(__name__)
-
-
-@login_required
-def compare_two_organizations_for_merge_view(request):
-    # admin, analytics_admin, partner_organization, political_data_manager, political_data_viewer, verified_volunteer
-    authority_required = {'political_data_manager'}
-    if not voter_has_authority(request, authority_required):
-        return redirect_to_sign_in_page(request, authority_required)
-
-    organization1_we_vote_id = request.GET.get('organization1_we_vote_id', 0)
-    organization2_we_vote_id = request.GET.get('organization2_we_vote_id', 0)
-    google_civic_election_id = request.GET.get('google_civic_election_id', 0)
-    google_civic_election_id = convert_to_int(google_civic_election_id)
-
-    organization_manager = OrganizationManager()
-    organization_results = organization_manager.retrieve_organization_from_we_vote_id(organization1_we_vote_id)
-    if not organization_results['organization_found']:
-        messages.add_message(request, messages.ERROR, "Organization1 not found.")
-        return HttpResponseRedirect(reverse('organization:organization_list', args=()) +
-                                    "?google_civic_election_id=" + str(google_civic_election_id))
-
-    organization_option1_for_template = organization_results['organization']
-
-    organization_results = organization_manager.retrieve_organization_from_we_vote_id(organization2_we_vote_id)
-    if not organization_results['organization_found']:
-        messages.add_message(request, messages.ERROR, "Organization2 not found.")
-        return HttpResponseRedirect(reverse('organization:organization_position_list',
-                                            args=(organization_option1_for_template.id,)) +
-                                    "?google_civic_election_id=" + str(google_civic_election_id))
-
-    organization_option2_for_template = organization_results['organization']
-
-    organization_merge_conflict_values = figure_out_organization_conflict_values(
-        organization_option1_for_template, organization_option2_for_template)
-
-    # This view function takes us to displaying a template
-    remove_duplicate_process = False  # Do not try to find another office to merge after finishing
-    return render_organization_merge_form(
-        request, organization_option1_for_template,
-        organization_option2_for_template,
-        organization_merge_conflict_values,
-        remove_duplicate_process)
 
 
 @login_required
@@ -308,6 +268,7 @@ def edit_team_members_view(request, organization_id=0, organization_we_vote_id="
     }
     return render(request, 'organization/edit_team_members.html', template_values)
 
+
 @login_required
 def organization_analyze_tweets_view(request, organization_we_vote_id):
     """
@@ -320,17 +281,18 @@ def organization_analyze_tweets_view(request, organization_we_vote_id):
     state_code = request.GET.get('state_code', False)
 
     org_hashtags = organization_analyze_tweets(organization_we_vote_id)
-    messages.add_message(request, messages.INFO, 'Tweets stored locally: {cached_tweets}, '
-                                                 'Hash tags retrieved: {hash_tags_retrieved}, '
-                                                 'Number of unique hashtags found in cached tweets: '
-                                                 '{unique_hashtags}, '
-                                                 'Endorser links to hashtags: '
-                                                 '{organization_link_to_hashtag_results}'
-                                                 ''.format(cached_tweets=org_hashtags['cached_tweets'],
-                                                           hash_tags_retrieved=org_hashtags['hash_tags_retrieved'],
-                                                           unique_hashtags=org_hashtags['unique_hashtags'],
-                                                           organization_link_to_hashtag_results=
-                                                           org_hashtags['organization_link_to_hashtag_results']))
+    messages.add_message(request, messages.INFO,
+                         'Tweets stored locally: {cached_tweets}, '
+                         'Hash tags retrieved: {hash_tags_retrieved}, '
+                         'Number of unique hashtags found in cached tweets: '
+                         '{unique_hashtags}, '
+                         'Endorser links to hashtags: '
+                         '{organization_link_to_hashtag_results}'
+                         ''.format(
+                             cached_tweets=org_hashtags['cached_tweets'],
+                             hash_tags_retrieved=org_hashtags['hash_tags_retrieved'],
+                             unique_hashtags=org_hashtags['unique_hashtags'],
+                             organization_link_to_hashtag_results=org_hashtags['organization_link_to_hashtag_results']))
     return HttpResponseRedirect(reverse('organization:organization_we_vote_id_position_list',
                                         args=(organization_we_vote_id,)) +
                                 "?google_civic_election_id=" + str(google_civic_election_id) + "&state_code=" +
@@ -729,8 +691,10 @@ def organization_list_view(request):
         'sort_by':                  sort_by,
         'state_code':               state_code,
         'state_list':               sorted_state_list,
+        'TWITTER_API_ON':           TWITTER_API_ON,
     }
     return render(request, 'organization/organization_list.html', template_values)
+
 
 @login_required
 def organization_merge_process_view(request):
@@ -797,7 +761,7 @@ def organization_merge_process_view(request):
                                     "&state_code=" + str(state_code))
 
     organization1_results = organization_manager.retrieve_organization(
-        organization_we_vote_id=organization1_we_vote_id,
+        we_vote_id=organization1_we_vote_id,
         read_only=True)
     if organization1_results['organization_found']:
         organization1_on_stage = organization1_results['organization']
@@ -818,10 +782,13 @@ def organization_merge_process_view(request):
 
     # Gather choices made from merge form
     conflict_results = figure_out_organization_conflict_values(organization1_on_stage, organization2_on_stage)
-    organization_merge_conflict_values = conflict_results['organization_merge_conflict_values']
+    organization_merge_conflict_values = conflict_results['conflict_values']
     if not conflict_results['success']:
         status += conflict_results['status']
-        messages.add_message(request, messages.ERROR, status)
+        success = conflict_results['success']
+    else:
+        status += "COMPARE_TWO_ORGANIZATIONS_DUPLICATE_FOUND "
+
     admin_merge_choices = {}
     clear_these_attributes_from_organization2 = []
     for attribute in ORGANIZATION_UNIQUE_IDENTIFIERS:
@@ -840,9 +807,8 @@ def organization_merge_process_view(request):
     merge_results = merge_these_two_organizations(
         organization1_we_vote_id,
         organization2_we_vote_id,
-        admin_merge_choices,
-        clear_these_attributes_from_organization2)
-
+        admin_merge_choices)
+    
     if positive_value_exists(merge_results['organizations_merged']):
         organization = merge_results['organization']
         messages.add_message(request, messages.INFO, "Organization '{organization_name}' merged."
@@ -863,13 +829,12 @@ def organization_merge_process_view(request):
             except Exception as e:
                 status += 'FAILED_TO_CREATE_VOLUNTEER_TASK_COMPLETED-DEDUPLICATION: ' \
                           '{error} [type: {error_type}]'.format(error=e, error_type=type(e))
-        return HttpResponseRedirect(reverse('organization:organization_edit', args=(organization1_on_stage.id,)))
+        # return HttpResponseRedirect(reverse('organization:organization_edit', args=(organization1_on_stage.id,)))
 
-    else:
-        messages.add_message(request, messages.ERROR, merge_results['status'])
-        return HttpResponseRedirect(reverse('organization:duplicates_list', args=()) +
-                                    "?google_civic_election_id=" + str(google_civic_election_id) +
-                                    "&state_code=" + str(state_code))
+    messages.add_message(request, messages.INFO, merge_results['status'])
+    return HttpResponseRedirect(reverse('organization:duplicates_list', args=()) +
+                                "?google_civic_election_id=" + str(google_civic_election_id) +
+                                "&state_code=" + str(state_code))
 
     # if redirect_to_organization_list:
     #     return HttpResponseRedirect(reverse('organization:organization_list', args=()) +
@@ -911,6 +876,7 @@ def organization_new_view(request):
         'state_list':               sorted_state_list,
     }
     return render(request, 'organization/organization_edit.html', template_values)
+
 
 @login_required
 def organization_delete_all_duplicates_view(request):
@@ -954,6 +920,10 @@ def organization_duplicates_list_view(request):
     sorted_state_list = sorted(state_list.items())
 
     try:
+        # Currently we use "ArePossibleDuplicates" to track if we have checked to see if
+        # the value in organization1_we_vote_id has been checked against all other entries.
+        # Instead, I think it would be better to store an explicit "OrganizationsDidNotMatchAutomatically"
+        # This would also remove the need to re-check comparisons that have already been made.
         queryset = OrganizationsArePossibleDuplicates.objects.using('readonly').all()
         if positive_value_exists(state_code):
             queryset = queryset.filter(state_code__iexact=state_code)
@@ -969,6 +939,7 @@ def organization_duplicates_list_view(request):
         # This is fine
         pass
 
+    # We want to make a single query so we have the Organization information (logo, name, etc.) for display
     organizations_dict = {}
     organizations_to_display_we_vote_id_list = []
     for one_duplicate in duplicates_list:
@@ -998,8 +969,8 @@ def organization_duplicates_list_view(request):
             possible_duplicates_count -= 1
 
     messages.add_message(request, messages.INFO,
-                         "Organizations analyzed: {duplicates_list_count:,}. "
-                         "Possible duplicate organizations found: {possible_duplicates_count:,}. "
+                         "Endorsers analyzed: {duplicates_list_count:,}. "
+                         "Possible duplicate endorsers found: {possible_duplicates_count:,}. "
                          "State: {state_code}"
                          "".format(
                              duplicates_list_count=duplicates_list_count,
@@ -1018,6 +989,7 @@ def organization_duplicates_list_view(request):
         'state_list':                   sorted_state_list,
     }
     return render(request, 'organization/organization_duplicates_list.html', template_values)
+
 
 @login_required
 def organization_edit_view(request, organization_id=0, organization_we_vote_id=""):
@@ -1114,6 +1086,7 @@ def organization_edit_view(request, organization_id=0, organization_we_vote_id="
         'organization_types':                   organization_types_list,
         'state_list':                           sorted_state_list,
         'state_served_code':                    state_served_code,
+        'TWITTER_API_ON':                       TWITTER_API_ON,
         'twitter_handle_mismatch':              twitter_handle_mismatch,
         'twitter_link_to_organization':         twitter_link_to_organization,
         'twitter_link_to_organization_handle':  twitter_link_to_organization_handle,
@@ -1121,6 +1094,7 @@ def organization_edit_view(request, organization_id=0, organization_we_vote_id="
         'voter':                                voter,
     }
     return render(request, 'organization/organization_edit.html', template_values)
+
 
 @login_required
 def organizations_not_duplicates_view(request):
@@ -1167,10 +1141,11 @@ def organizations_not_duplicates_view(request):
 
     else:
         messages.add_message(request, messages.ERROR,
-                             'Could not save politicians_are_not_duplicates entry: ' +
+                             'Could not save organizations_are_not_duplicates entry: ' +
                              results['status'])
-    return HttpResponseRedirect(reverse('politician:duplicates_list', args=()) +
+    return HttpResponseRedirect(reverse('organization:duplicates_list', args=()) +
                                 "?state_code=" + str(state_code))
+
 
 @login_required
 def organization_edit_account_view(request, organization_id=0, organization_we_vote_id=""):
@@ -1450,6 +1425,10 @@ def organization_edit_process_view(request):
     tiktok_url = request.POST.get('tiktok_url', False)
     if tiktok_url is not False:
         tiktok_url = normalize_tiktok_url(tiktok_url)
+    twitter_description = request.POST.get('twitter_description', False)
+    twitter_followers_count = request.POST.get('twitter_followers_count', False)
+    if positive_value_exists(twitter_followers_count):
+        twitter_followers_count = convert_to_int(twitter_followers_count)
     wikipedia_page_title = request.POST.get('wikipedia_page_title', False)
     wikipedia_photo_url = request.POST.get('wikipedia_photo_url', False)
 
@@ -1616,12 +1595,15 @@ def organization_edit_process_view(request):
             elif results['twitter_user_found']:
                 twitter_user = results['twitter_user']
                 twitter_link_to_organization_from_handle_twitter_id = twitter_user.twitter_id
+            elif not TWITTER_API_ON:
+                messages.add_message(request, messages.INFO, 'Twitter API turned off.')
+                twitter_handle_can_be_saved_without_conflict = False
             else:
                 messages.add_message(request, messages.ERROR, 'Twitter handle you entered not found on Twitter.')
                 twitter_handle_can_be_saved_without_conflict = False
 
     if positive_value_exists(organization_we_vote_id) and positive_value_exists(organization_twitter_handle) \
-            and twitter_handle_can_be_saved_without_conflict:
+            and twitter_handle_can_be_saved_without_conflict and TWITTER_API_ON:
         # Check to see if there is a TwitterLinkToOrganization entry tied to this organization_we_vote_id
         link_results = twitter_user_manager.retrieve_twitter_link_to_organization(
             organization_we_vote_id=organization_we_vote_id)
@@ -1846,9 +1828,17 @@ def organization_edit_process_view(request):
                 issue_analysis_done_changed = True
             organization_on_stage.issue_analysis_done = positive_value_exists(issue_analysis_done)
             if organization_twitter_handle is not False:
-                if twitter_handle_can_be_saved_without_conflict:
+                if twitter_handle_can_be_saved_without_conflict or not TWITTER_API_ON:
                     organization_on_stage.organization_twitter_handle = organization_twitter_handle
                 organization_on_stage.organization_twitter_updates_failing = organization_twitter_updates_failing
+            if not TWITTER_API_ON:
+                # If the Twitter API is not available, take in form fields related to Twitter metadata
+                if twitter_description is not False:
+                    organization_on_stage.twitter_description = twitter_description.strip() \
+                        if twitter_description else None
+                if twitter_followers_count is not False:
+                    organization_on_stage.twitter_followers_count = twitter_followers_count \
+                        if twitter_followers_count else None
             if organization_contact_form_url is not False:
                 organization_on_stage.organization_contact_form_url = organization_contact_form_url.strip()
             organization_defunct_before = positive_value_exists(organization_on_stage.organization_defunct)
@@ -1894,7 +1884,8 @@ def organization_edit_process_view(request):
         return HttpResponseRedirect(reverse('organization:organization_list', args=()))
 
     # Pull the latest Twitter information
-    if not organization_twitter_updates_failing and not organization_on_stage.organization_twitter_updates_failing:
+    if TWITTER_API_ON and \
+            not organization_twitter_updates_failing and not organization_on_stage.organization_twitter_updates_failing:
         results = refresh_twitter_organization_details(organization_on_stage)
         status += results['status']
 
@@ -2632,6 +2623,7 @@ def organization_position_list_view(request, organization_id=0, organization_we_
         'show_all_elections':               show_all_elections,
         'state_code':                       state_code,
         'state_list':                       sorted_state_list,
+        'TWITTER_API_ON':                   TWITTER_API_ON,
         'twitter_handle_mismatch':          twitter_handle_mismatch,
         'twitter_link_to_organization':     twitter_link_to_organization,
         'voter':                            voter,
@@ -2915,6 +2907,7 @@ def organization_position_edit_view(request, organization_id=0, organization_we_
     In edit, you can only change your stance and comments, not who or what the position is about
     :param request:
     :param organization_id:
+    :param organization_we_vote_id:
     :param position_we_vote_id:
     :return:
     """
@@ -2985,7 +2978,7 @@ def organization_position_edit_view(request, organization_id=0, organization_we_
     state_list = STATE_CODE_MAP
     sorted_state_list = sorted(state_list.items())
 
-    print("Sorted state_list: ", sorted_state_list)
+    # print("Sorted state_list: ", sorted_state_list)
 
     if organization_position_on_stage_found:
         template_values = {
@@ -3730,9 +3723,9 @@ def reserved_domain_list_view(request):
     }
     return render(request, 'organization/reserved_domain_list.html', template_values)
 
+
 @login_required
 def compare_two_organizations_for_merge_view(request):
-    status = ''
     # admin, analytics_admin, partner_organization, political_data_manager, political_data_viewer, verified_volunteer
     authority_required = {'political_data_manager'}
     if not voter_has_authority(request, authority_required):
@@ -3743,10 +3736,11 @@ def compare_two_organizations_for_merge_view(request):
     google_civic_election_id = request.GET.get('google_civic_election_id', 0)
     google_civic_election_id = convert_to_int(google_civic_election_id)
     state_code = request.GET.get('state_code', '')
+    status = ''
 
     organization_manager = OrganizationManager()
     organization_results = organization_manager.retrieve_organization(
-        organization_we_vote_id=organization1_we_vote_id,
+        we_vote_id=organization1_we_vote_id,
         read_only=True)
     if not organization_results['organization_found']:
         messages.add_message(request, messages.ERROR, "Organization1 not found.")
@@ -3758,7 +3752,7 @@ def compare_two_organizations_for_merge_view(request):
     organization_option1_for_template = organization_results['organization']
 
     organization_results = organization_manager.retrieve_organization(
-        organization_we_vote_id=organization2_we_vote_id,
+        we_vote_id=organization2_we_vote_id,
         read_only=True)
     if not organization_results['organization_found']:
         messages.add_message(request, messages.ERROR, "Organization2 not found.")
@@ -3778,10 +3772,12 @@ def compare_two_organizations_for_merge_view(request):
 
     conflict_results = figure_out_organization_conflict_values(
         organization_option1_for_template, organization_option2_for_template)
-    organization_merge_conflict_values = conflict_results['organization_merge_conflict_values']
+    organization_merge_conflict_values = conflict_results['conflict_values']
     if not conflict_results['success']:
         status += conflict_results['status']
         messages.add_message(request, messages.ERROR, status)
+    else:
+        status += "COMPARE_TWO_ORGANIZATIONS_NO_CONFLICT_VALUES "
 
     # This view function takes us to displaying a template
     remove_duplicate_process = False  # Do not try to find another office to merge after finishing
@@ -3805,28 +3801,33 @@ def find_and_merge_duplicate_organizations_view(request):
     status = ""
     organization_manager = OrganizationManager()
 
-
+    # ################################
+    # Assemble a list of organizations that we already think might be duplicates
     queryset = OrganizationsArePossibleDuplicates.objects.using('readonly').all()
     if positive_value_exists(state_code):
         queryset = queryset.filter(state_code__iexact=state_code)
     queryset = queryset.exclude(organization1_we_vote_id=None)
     queryset = queryset.exclude(organization2_we_vote_id=None)
-    queryset_organization1 = queryset.values('organization1_we_vote_id', flat=True).distinct()
+    queryset_organization1 = queryset.values_list('organization1_we_vote_id', flat=True).distinct()
     exclude_organization1_we_vote_id_list = list(queryset_organization1)
-    queryset_organization2 = queryset.values('organization2_we_vote_id', flat=True).distinct()
+    queryset_organization2 = queryset.values_list('organization2_we_vote_id', flat=True).distinct()
     exclude_organization2_we_vote_id_list = list(queryset_organization2)
     exclude_organization_we_vote_id_list = \
         list(set(exclude_organization1_we_vote_id_list + exclude_organization2_we_vote_id_list))
    
+    # ################################
+    # Retrieve list of organizations to compare
     organization_query = Organization.objects.using('readonly').all()
     organization_query = organization_query.exclude(we_vote_id__in=exclude_organization_we_vote_id_list)
     if positive_value_exists(state_code):
         organization_query = organization_query.filter(state_served_code__iexact=state_code)
     organization_list = list(organization_query)
 
-
+    # ################################
+    # When this search is run, give scoreboard credit to the volunteer who started this search
     try:
         # Give the volunteer who entered this credit
+        # October 2025: Add a new constant for duplicate organization analysis
         volunteer_task_manager = VolunteerTaskManager()
         task_results = volunteer_task_manager.create_volunteer_task_completed(
             action_constant=VOLUNTEER_ACTION_DUPLICATE_POLITICIAN_ANALYSIS,
@@ -3835,21 +3836,64 @@ def find_and_merge_duplicate_organizations_view(request):
     except Exception as e:
         status += 'FAILED_TO_CREATE_VOLUNTEER_TASK_COMPLETED: ' \
                   '{error} [type: {error_type}]'.format(error=e, error_type=type(e))
-    
-    # Loop through all the organizations in this election
+
+    # We need to clean the data and make sure that linked politicians still exist.
+    politician_we_vote_id_list_to_verify = []
+    politician_to_org_dict = {}
+    for we_vote_organization in organization_list:
+        if positive_value_exists(we_vote_organization.politician_we_vote_id):
+            politician_we_vote_id_list_to_verify.append(we_vote_organization.politician_we_vote_id)
+            politician_to_org_dict[we_vote_organization.politician_we_vote_id] = we_vote_organization.we_vote_id
+
+    # Query to find non-existent politician we_vote_ids
+    from politician.models import Politician
+    politician_we_vote_ids_that_have_matching_entry = Politician.objects.using('readonly')\
+        .filter(we_vote_id__in=politician_we_vote_id_list_to_verify)\
+        .values_list('we_vote_id', flat=True)
+
+    # Convert QuerySet to a set for efficient lookup
+    existing_politician_we_vote_ids_set = set(politician_we_vote_ids_that_have_matching_entry)
+
+    # Find the we_vote_ids that don't exist in the Politician table
+    non_existent_politician_we_vote_ids = \
+        set(politician_we_vote_id_list_to_verify) - existing_politician_we_vote_ids_set
+    # Now non_existent_politician_we_vote_ids contains the list of we_vote_ids that don't exist in the Politician table
+
+    # If you need to update the organizations with non-existent politicians
+    at_least_one_politician_we_vote_id_removed = False
+    for non_existent_we_vote_id in non_existent_politician_we_vote_ids:
+        at_least_one_politician_we_vote_id_removed = True
+        org_we_vote_id = politician_to_org_dict.get(non_existent_we_vote_id)
+        if org_we_vote_id:
+            # Update the organization to remove the non-existent politician link
+            Organization.objects.filter(we_vote_id=org_we_vote_id).update(politician_we_vote_id=None)
+
+    # Log or handle the non-existent politician we_vote_ids as needed
+    if non_existent_politician_we_vote_ids:
+        status += f"NON_EXISTENT_POLITICIAN_WE_VOTE_IDS_FOUND: {', '.join(non_existent_politician_we_vote_ids)} "
+
+    # Second retrieve of list of organizations if we did any data-cleaning above
+    if at_least_one_politician_we_vote_id_removed:
+        organization_query = Organization.objects.using('readonly').all()
+        organization_query = organization_query.exclude(we_vote_id__in=exclude_organization_we_vote_id_list)
+        if positive_value_exists(state_code):
+            organization_query = organization_query.filter(state_served_code__iexact=state_code)
+        organization_list = list(organization_query)
+
+    # Loop through all the organizations in this state, and check (organization by organization) for possible duplicates
     for we_vote_organization in organization_list:
         if we_vote_organization.we_vote_id in exclude_organization_we_vote_id_list:
             continue
         # Start ignore list with entries already reviewed
-        ignore_organization_id_list = exclude_organization_we_vote_id_list
+        ignore_organization_we_vote_id_list = exclude_organization_we_vote_id_list
         # Add current entry to ignore list
-        ignore_organization_id_list.append(we_vote_organization.we_vote_id)
+        ignore_organization_we_vote_id_list.append(we_vote_organization.we_vote_id)
         # Now check for others we have already labeled as "not a duplicate"
-        not_a_duplicate_list = organization_manager.fetch_organizations_are_not_duplicates_list_we_vote_id(
+        # TODO This is very inefficient. We should be able to pull this from a dictionary created from single query
+        not_a_duplicate_list = organization_manager.fetch_organizations_are_not_duplicates_list_we_vote_ids(
             we_vote_organization.we_vote_id)
-        ignore_organization_id_list += not_a_duplicate_list
-
-        results = find_duplicate_organization(we_vote_organization, ignore_organization_id_list, read_only=True)
+        ignore_organization_we_vote_id_list += not_a_duplicate_list
+        results = find_duplicate_organization(we_vote_organization, ignore_organization_we_vote_id_list, read_only=True)
 
         # If we find organizations to merge, store them for review
         if results['organization_merge_possibility_found']:
@@ -3871,29 +3915,43 @@ def find_and_merge_duplicate_organizations_view(request):
                 OrganizationsArePossibleDuplicates.objects.create(
                     organization1_we_vote_id=organization.we_vote_id,
                     organization2_we_vote_id=None,
-                    state_code=state_code,
+                    state_code=organization.state_served_code,
                 )
-                messages.add_message(request, messages.INFO,
-                                    "Organization {organization_name} automatically merged."
-                                    "".format(organization_name=organization.organization_name))
+                OrganizationsArePossibleDuplicates.objects.create(
+                    organization1_we_vote_id=we_vote_organization.we_vote_id,
+                    organization2_we_vote_id=None,
+                    state_code=we_vote_organization.state_served_code,
+                )
+                messages.add_message(
+                    request, messages.INFO,
+                    "Endorser {organization_name} automatically merged."
+                    "".format(organization_name=organization.organization_name))
             else:
                 # Add an entry showing that this is a possible match
+                state_code_local = state_code
+                if not positive_value_exists(state_code_local):
+                    if positive_value_exists(we_vote_organization.state_served_code):
+                        state_code_local = we_vote_organization.state_served_code
+                    else:
+                        state_code_local = organization_option2_for_template.state_served_code
                 OrganizationsArePossibleDuplicates.objects.create(
                     organization1_we_vote_id=we_vote_organization.we_vote_id,
                     organization2_we_vote_id=organization_option2_for_template.we_vote_id,
-                    state_code=state_code,
+                    state_code=state_code_local,
                 )
                 if organization_option2_for_template.we_vote_id not in exclude_organization_we_vote_id_list:
                     exclude_organization_we_vote_id_list.append(organization_option2_for_template.we_vote_id)
         else:
             # No matches found
-            OrganizationsArePossibleDuplicates.objects.create(
-                organization1_we_vote_id=we_vote_organization.we_vote_id,
-                organization2_we_vote_id=None,
-                state_code=state_code,
-            )
+            if we_vote_organization.we_vote_id not in exclude_organization_we_vote_id_list:
+                # TODO Add an entry from new table-to-be-created OrganizationsDidNotMatchAutomatically table
+                OrganizationsArePossibleDuplicates.objects.create(
+                    organization1_we_vote_id=we_vote_organization.we_vote_id,
+                    organization2_we_vote_id=None,
+                    state_code=we_vote_organization.state_served_code,
+                )
     
     return HttpResponseRedirect(reverse('organization:duplicates_list', args=()) +
-                                "?state_code="
+                                "?state_code={state_code}"
                                 "".format(state_code=state_code))
         

@@ -1157,6 +1157,7 @@ def filter_candidates_structured_json_for_local_duplicates(structured_json):
 
 
 def candidates_import_from_structured_json(structured_json):  # Consumes candidatesSyncOut
+    from import_export_facebook.controllers import is_invalid_facebook_url_format
     candidate_manager = CandidateManager()
     candidates_saved = 0
     candidates_updated = 0
@@ -1267,7 +1268,9 @@ def candidates_import_from_structured_json(structured_json):  # Consumes candida
                 updated_candidate_values['facebook_profile_image_url_https'] = \
                     one_candidate['facebook_profile_image_url_https']
             if 'facebook_url' in one_candidate:
-                updated_candidate_values['facebook_url'] = one_candidate['facebook_url']
+                results_test = is_invalid_facebook_url_format(one_candidate['facebook_url'])
+                if not results_test['is_invalid']:
+                    updated_candidate_values['facebook_url'] = one_candidate['facebook_url']
             if 'facebook_url_is_broken' in one_candidate:
                 updated_candidate_values['facebook_url_is_broken'] = one_candidate['facebook_url_is_broken']
             if 'google_civic_candidate_name' in one_candidate:
@@ -1970,6 +1973,8 @@ def generate_candidate_dict_from_candidate_object(
         'instagram_handle':                 candidate.instagram_handle,
         'is_battleground_race':             candidate.is_battleground_race
         if positive_value_exists(candidate.is_battleground_race) else False,
+        'is_claimed_profile':               candidate.is_claimed_profile
+        if positive_value_exists(candidate.is_claimed_profile) else False,
         'kind_of_ballot_item':              CANDIDATE,
         'last_updated':                     date_last_updated,
         'linked_campaignx_we_vote_id':      candidate.linked_campaignx_we_vote_id,
@@ -2537,9 +2542,12 @@ def retrieve_candidate_list_for_all_upcoming_elections(
 def fetch_ballotpedia_urls_to_retrieve_for_links_count(
         candidate_we_vote_id_list=[],
         state_code='',
+        default_year_if_empty=True
 ):
     ballotpedia_urls_to_retrieve_for_links = 0
     if not candidate_we_vote_id_list or len(candidate_we_vote_id_list) == 0:
+        if not default_year_if_empty:
+            return 0
         # Only look at candidates for this year
         candidate_list_manager = CandidateListManager()
         results = candidate_list_manager.retrieve_candidate_we_vote_id_list_from_year_list(
@@ -2567,9 +2575,12 @@ def fetch_ballotpedia_urls_to_retrieve_for_links_count(
 def fetch_ballotpedia_urls_to_retrieve_for_photos_count(
         candidate_we_vote_id_list=[],
         state_code='',
+        default_year_if_empty=True,
 ):
     ballotpedia_urls_to_retrieve_for_photos = 0
     if not candidate_we_vote_id_list or len(candidate_we_vote_id_list) == 0:
+        if not default_year_if_empty:
+            return 0
         # Only look at candidates for this year
         candidate_list_manager = CandidateListManager()
         results = candidate_list_manager.retrieve_candidate_we_vote_id_list_from_year_list(
@@ -3651,6 +3662,7 @@ def update_candidate_details_from_politician(candidate=None, politician=None):
                 object2=candidate,
                 object1_field_name_list=[
                     'ballot_guide_official_statement',
+                    'is_claimed_profile',
                 ],
                 only_change_object2_field_if_incoming_value=False,
                 only_change_object2_field_if_no_existing_value=False)
@@ -3708,21 +3720,28 @@ def update_candidate_details_from_politician(candidate=None, politician=None):
                 elif not results['success']:
                     status += "FAILED_TO_ADD_GOOGLE_CIVIC_CANDIDATE_NAME3: " + results['status']
             # Facebook
+            from import_export_facebook.controllers import is_invalid_facebook_url_format
             if positive_value_exists(politician.facebook_url) and not politician.facebook_url_is_broken:
-                candidate.facebook_url = politician.facebook_url
-                save_changes = True
-                if 'facebook_url' not in fields_updated:
-                    fields_updated.append('facebook_url')
+                results_test = is_invalid_facebook_url_format(politician.facebook_url)
+                if not results_test['is_invalid']:
+                    candidate.facebook_url = politician.facebook_url
+                    save_changes = True
+                    if 'facebook_url' not in fields_updated:
+                        fields_updated.append('facebook_url')
             elif positive_value_exists(politician.facebook_url2) and not politician.facebook_url2_is_broken:
-                candidate.facebook_url = politician.facebook_url2
-                save_changes = True
-                if 'facebook_url' not in fields_updated:
-                    fields_updated.append('facebook_url')
+                results_test = is_invalid_facebook_url_format(politician.facebook_url2)
+                if not results_test['is_invalid']:
+                    candidate.facebook_url = politician.facebook_url2
+                    save_changes = True
+                    if 'facebook_url' not in fields_updated:
+                        fields_updated.append('facebook_url')
             elif positive_value_exists(politician.facebook_url3) and not politician.facebook_url3_is_broken:
-                candidate.facebook_url = politician.facebook_url3
-                save_changes = True
-                if 'facebook_url' not in fields_updated:
-                    fields_updated.append('facebook_url')
+                results_test = is_invalid_facebook_url_format(politician.facebook_url3)
+                if not results_test['is_invalid']:
+                    candidate.facebook_url = politician.facebook_url3
+                    save_changes = True
+                    if 'facebook_url' not in fields_updated:
+                        fields_updated.append('facebook_url')
             # Email
             if positive_value_exists(politician.politician_email):
                 candidate.candidate_email = politician.politician_email
@@ -3839,6 +3858,7 @@ def update_candidate_details_from_politician(candidate=None, politician=None):
                     save_changes = True
                     if 'profile_image_type_currently_active' not in fields_updated:
                         fields_updated.append('profile_image_type_currently_active')
+            # Only update parallel fields with values if there isn't a candidate value
             results = copy_field_value_from_object1_to_object2(
                 object1=politician,
                 object2=candidate,

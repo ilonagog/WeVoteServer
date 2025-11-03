@@ -5,13 +5,14 @@
 import json
 from time import time
 
+from django.contrib import messages
 from django.core.exceptions import RequestDataTooBig
 from django.http import HttpResponse
 from django.views.decorators.csrf import csrf_exempt
 from django_user_agents.utils import get_user_agent
 
 import wevote_functions.admin
-from apis_v1.controllers import organization_follow, voter_count
+from apis_v1.controllers import voter_count
 from apis_v1.views import views_voter_utils
 from ballot.controllers import choose_election_and_prepare_ballot_data, voter_ballot_items_retrieve_for_api, \
     voter_ballot_list_retrieve_for_api
@@ -34,7 +35,7 @@ from import_export_facebook.controllers import voter_facebook_sign_in_retrieve_f
 from import_export_google_civic.controllers import voter_ballot_items_retrieve_from_google_civic_for_api
 from import_export_twitter.controllers import voter_twitter_save_to_current_account_for_api
 from issue.models import IssueManager
-from organization.models import Organization, OrganizationManager
+from organization.models import INDIVIDUAL, Organization, OrganizationManager
 from position.controllers import voter_all_positions_retrieve_for_api, \
     voter_position_retrieve_for_api, voter_position_comment_save_for_api, voter_position_visibility_save_for_api
 from sms.controllers import voter_sms_phone_number_retrieve_for_api, voter_sms_phone_number_save_for_api
@@ -62,6 +63,39 @@ from wevote_functions.functions_date import DATE_FORMAT_YMD_HMS
 logger = wevote_functions.admin.get_logger(__name__)
 
 WE_VOTE_SERVER_ROOT_URL = get_environment_variable("WE_VOTE_SERVER_ROOT_URL")
+
+
+def get_politician_data_results(candidate_id, candidate_we_vote_id, politician_id, politician_we_vote_id):
+    status = ""
+    # Make an extra effort to get latest politician data
+    if not positive_value_exists(politician_we_vote_id):
+        if positive_value_exists(candidate_we_vote_id):
+            try:
+                from candidate.models import CandidateCampaign
+                candidate = CandidateCampaign.objects.using('readonly').get(we_vote_id=candidate_we_vote_id)
+                politician_we_vote_id = candidate.politician_we_vote_id
+            except Exception as e:
+                status += "ERROR with CandidateCampaign.objects.using('readonly').get: " + str(e) + " "
+    if not positive_value_exists(politician_we_vote_id):
+        if positive_value_exists(candidate_id):
+            try:
+                from candidate.models import CandidateCampaign
+                candidate = CandidateCampaign.objects.using('readonly').get(id=candidate_id)
+                politician_we_vote_id = candidate.politician_we_vote_id
+            except Exception as e:
+                status += "ERROR with CandidateCampaign.objects.using('readonly').get: " + str(e) + " "
+    if positive_value_exists(politician_we_vote_id) and not positive_value_exists(politician_id):
+        try:
+            from politician.models import Politician
+            politician = Politician.objects.using('readonly').get(we_vote_id=politician_we_vote_id)
+            politician_id = politician.id
+        except Exception as e:
+            status += "ERROR with Politician.objects.using('readonly').get: " + str(e) + " "
+    return {
+        'politician_id': politician_id,
+        'politician_we_vote_id': politician_we_vote_id,
+        'status': status,
+    }
 
 
 @csrf_exempt
@@ -521,9 +555,9 @@ def voter_address_save_view(request):  # voterAddressSave
         # Search for these variables elsewhere when updating code
         turn_off_direct_voter_ballot_retrieve = False
         default_election_data_source_is_ballotpedia = False
-        default_election_data_source_is_ctcl = True
+        default_election_data_source_is_ctcl = False
         default_election_data_source_is_google_civic = False
-        default_election_data_source_is_vote_usa = False
+        default_election_data_source_is_vote_usa = True
         was_refreshed_from_ballotpedia_just_now = False
         was_refreshed_from_ctcl_just_now = False
         was_refreshed_from_vote_usa_just_now = False
@@ -1145,19 +1179,29 @@ def voter_email_address_save_view(request):  # voterEmailAddressSave
     :param request:
     :return:
     """
-    voter_device_id = get_voter_device_id(request)  # We standardize how we take in the voter_device_id
-    text_for_email_address = request.GET.get('text_for_email_address', '')
+    delete_email = positive_value_exists(request.GET.get('delete_email', ""))
+    email_address_we_vote_id = request.GET.get('email_address_we_vote_id', '')
+    hostname = request.GET.get('hostname', '')
+    is_cordova = positive_value_exists(request.GET.get('is_cordova', False))
     incoming_email_we_vote_id = request.GET.get('email_we_vote_id', '')
+    make_primary_email = positive_value_exists(request.GET.get('make_primary_email', False))
     resend_verification_email = positive_value_exists(request.GET.get('resend_verification_email', False))
     resend_verification_code_email = positive_value_exists(request.GET.get('resend_verification_code_email', False))
     send_link_to_sign_in = positive_value_exists(request.GET.get('send_link_to_sign_in', False))
     send_sign_in_code_email = positive_value_exists(request.GET.get('send_sign_in_code_email', False))
-    make_primary_email = positive_value_exists(request.GET.get('make_primary_email', False))
-    delete_email = positive_value_exists(request.GET.get('delete_email', ""))
-    is_cordova = positive_value_exists(request.GET.get('is_cordova', False))
-    hostname = request.GET.get('hostname', '')
+    text_for_email_address = request.GET.get('text_for_email_address', '')
+    voter_device_id = get_voter_device_id(request)  # We standardize how we take in the voter_device_id
 
     if positive_value_exists(send_sign_in_code_email):
+        if positive_value_exists(email_address_we_vote_id):
+            # If here, we had to send in the email_address_we_vote_id because the incoming text_for_email_address might
+            #  have been obfuscated.
+            email_manager = EmailManager()
+            results = email_manager.retrieve_email_address_object(
+                email_address_object_we_vote_id=email_address_we_vote_id)
+            if results['email_address_object_found']:
+                email_address_object = results['email_address_object']
+                text_for_email_address = email_address_object.normalized_email_address
         results = voter_email_address_send_sign_in_code_email_for_api(
             voter_device_id=voter_device_id,
             text_for_email_address=text_for_email_address,
@@ -1824,21 +1868,19 @@ def voter_position_visibility_save_view(request):  # voterPositionVisibilitySave
     """
     kind_of_ballot_item = request.GET.get('kind_of_ballot_item', "")
     ballot_item_we_vote_id = request.GET.get('ballot_item_we_vote_id', None)
+    politician_we_vote_id = request.GET.get('politician_we_vote_id', None)
     visibility_setting = request.GET.get('visibility_setting', False)
     voter_device_id = get_voter_device_id(request)  # We standardize how we take in the voter_device_id
 
     candidate_we_vote_id = None
     measure_we_vote_id = None
     office_we_vote_id = None
-    politician_we_vote_id = None
     if kind_of_ballot_item == CANDIDATE:
         candidate_we_vote_id = ballot_item_we_vote_id
     elif kind_of_ballot_item == MEASURE:
         measure_we_vote_id = ballot_item_we_vote_id
     elif kind_of_ballot_item == OFFICE:
         office_we_vote_id = ballot_item_we_vote_id
-    elif kind_of_ballot_item == POLITICIAN:
-        politician_we_vote_id = ballot_item_we_vote_id
 
     results = voter_position_visibility_save_for_api(
         voter_device_id=voter_device_id,
@@ -1874,27 +1916,41 @@ def voter_position_comment_save_view(request):  # voterPositionCommentSave
     :param request:
     :return:
     """
-    voter_device_id = get_voter_device_id(request)  # We standardize how we take in the voter_device_id
-    position_we_vote_id = request.GET.get('position_we_vote_id', "")
-
-    statement_text = request.GET.get('statement_text', False)
-    statement_html = request.GET.get('statement_html', False)
-
-    kind_of_ballot_item = request.GET.get('kind_of_ballot_item', "")
     ballot_item_we_vote_id = request.GET.get('ballot_item_we_vote_id', None)
-
+    candidate_id = None
     candidate_we_vote_id = None
+    kind_of_ballot_item = request.GET.get('kind_of_ballot_item', "")
     measure_we_vote_id = None
     office_we_vote_id = None
-    politician_we_vote_id = None
+    politician_id = None
+    politician_we_vote_id = request.GET.get('politician_we_vote_id', None)
+    position_we_vote_id = request.GET.get('position_we_vote_id', "")
+    stance = request.GET.get('stance', False)
+    if stance == 'false':
+        stance = False
+    statement_text = request.GET.get('statement_text', False)
+    statement_html = request.GET.get('statement_html', False)
+    status = ''
+    visibility_setting = request.GET.get('visibility_setting', False)
+    if visibility_setting == 'false':
+        visibility_setting = False
+    voter_device_id = get_voter_device_id(request)  # We standardize how we take in the voter_device_id
+
     if kind_of_ballot_item == CANDIDATE:
         candidate_we_vote_id = ballot_item_we_vote_id
     elif kind_of_ballot_item == MEASURE:
         measure_we_vote_id = ballot_item_we_vote_id
     elif kind_of_ballot_item == OFFICE:
         office_we_vote_id = ballot_item_we_vote_id
-    elif kind_of_ballot_item == POLITICIAN:
-        politician_we_vote_id = ballot_item_we_vote_id
+    # We don't mix ballot_item_we_vote_id and politician_we_vote_id
+    # elif kind_of_ballot_item == POLITICIAN:
+    #     politician_we_vote_id = ballot_item_we_vote_id
+
+    politician_data_results = \
+        get_politician_data_results(candidate_id, candidate_we_vote_id, politician_id, politician_we_vote_id)
+    politician_id = politician_data_results['politician_id']
+    politician_we_vote_id = politician_data_results['politician_we_vote_id']
+    status += politician_data_results['status']
 
     results = voter_position_comment_save_for_api(
         voter_device_id=voter_device_id,
@@ -1903,8 +1959,10 @@ def voter_position_comment_save_view(request):  # voterPositionCommentSave
         candidate_we_vote_id=candidate_we_vote_id,
         measure_we_vote_id=measure_we_vote_id,
         politician_we_vote_id=politician_we_vote_id,
+        stance=stance,
         statement_text=statement_text,
         statement_html=statement_html,
+        visibility_setting=visibility_setting,
     )
 
     return HttpResponse(json.dumps(results), content_type='application/json')
@@ -1916,46 +1974,78 @@ def voter_opposing_save_view(request):  # voterOpposingSave
     :param request:
     :return:
     """
-    voter_device_id = get_voter_device_id(request)  # We standardize how we take in the voter_device_id
-    kind_of_ballot_item = request.GET.get('kind_of_ballot_item', "")
     ballot_item_id = request.GET.get('ballot_item_id', 0)
     ballot_item_we_vote_id = request.GET.get('ballot_item_we_vote_id', None)
-    user_agent_string = request.headers['user-agent']
-    user_agent_object = get_user_agent(request)
     candidate_id = 0
     candidate_we_vote_id = None
+    kind_of_ballot_item = request.GET.get('kind_of_ballot_item', "")
     measure_id = 0
     measure_we_vote_id = None
     politician_id = 0
-    politician_we_vote_id = None
+    politician_we_vote_id = request.GET.get('politician_we_vote_id', None)
     status = ''
+    success = True
+    user_agent_string = request.headers['user-agent']
+    user_agent_object = get_user_agent(request)
+    voter_device_id = get_voter_device_id(request)  # We standardize how we take in the voter_device_id
+
+    # Get voter object from voter_device_id
+    voter_manager = VoterManager()
+    results = voter_manager.retrieve_voter_from_voter_device_id(voter_device_id, read_only=True)
+    if results['voter_found']:
+        voter = results['voter']
+        voter_id = voter.id
+        # voter_is_signed_in = voter.is_signed_in()
+    else:
+        voter = None
+        voter_id = 0
+        status += results['status']
+        # voter_is_signed_in = False
+
     if kind_of_ballot_item == CANDIDATE:
         candidate_id = ballot_item_id
         candidate_we_vote_id = ballot_item_we_vote_id
     elif kind_of_ballot_item == MEASURE:
         measure_id = ballot_item_id
         measure_we_vote_id = ballot_item_we_vote_id
-    elif kind_of_ballot_item == POLITICIAN:
-        politician_id = ballot_item_id
-        politician_we_vote_id = ballot_item_we_vote_id
+    # We don't mix ballot_item_we_vote_id and politician_we_vote_id
+    # elif kind_of_ballot_item == POLITICIAN:
+    #     politician_id = ballot_item_id
+    #     politician_we_vote_id = ballot_item_we_vote_id
+
+    politician_data_results = \
+        get_politician_data_results(candidate_id, candidate_we_vote_id, politician_id, politician_we_vote_id)
+    politician_id = politician_data_results['politician_id']
+    politician_we_vote_id = politician_data_results['politician_we_vote_id']
+    status += politician_data_results['status']
+
     results = voter_opposing_save(
-        voter_device_id=voter_device_id,
         candidate_id=candidate_id,
         candidate_we_vote_id=candidate_we_vote_id,
+        make_heart_favorite_toggle_update=True,
         measure_id=measure_id,
         measure_we_vote_id=measure_we_vote_id,
         politician_id=politician_id,
         politician_we_vote_id=politician_we_vote_id,
         user_agent_string=user_agent_string,
-        user_agent_object=user_agent_object)
+        user_agent_object=user_agent_object,
+        voter=voter,
+        voter_device_id=voter_device_id,
+        voter_id=voter_id,
+    )
     status += results['status']
+    if not results['success']:
+        success = False
+
     json_data = {
         'ballot_item_id': results['ballot_item_id'],
         'ballot_item_we_vote_id': results['ballot_item_we_vote_id'],
         'kind_of_ballot_item': results['kind_of_ballot_item'],
+        'politician_we_vote_id': results['politician_we_vote_id'],
+        'position': results['position'],
         'position_we_vote_id': results['position_we_vote_id'],
         'status': status,
-        'success': results['success'],
+        'success': success,
         'voter_device_id': voter_device_id,
         'voter_id': results['voter_id'],
     }
@@ -2155,28 +2245,38 @@ def voter_stop_opposing_save_view(request):  # voterStopOpposingSave
     :param request:
     :return:
     """
-    voter_device_id = get_voter_device_id(request)  # We standardize how we take in the voter_device_id
-    kind_of_ballot_item = request.GET.get('kind_of_ballot_item', "")
     ballot_item_id = request.GET.get('ballot_item_id', 0)
     ballot_item_we_vote_id = request.GET.get('ballot_item_we_vote_id', None)
-    user_agent_string = request.headers['user-agent']
-    user_agent_object = get_user_agent(request)
     candidate_id = 0
     candidate_we_vote_id = None
+    kind_of_ballot_item = request.GET.get('kind_of_ballot_item', "")
     measure_id = 0
     measure_we_vote_id = None
     politician_id = 0
-    politician_we_vote_id = None
+    politician_we_vote_id = request.GET.get('politician_we_vote_id', None)
+    status = ""
+    user_agent_string = request.headers['user-agent']
+    user_agent_object = get_user_agent(request)
+    voter_device_id = get_voter_device_id(request)  # We standardize how we take in the voter_device_id
+
     if kind_of_ballot_item == CANDIDATE:
         candidate_id = ballot_item_id
         candidate_we_vote_id = ballot_item_we_vote_id
     elif kind_of_ballot_item == MEASURE:
         measure_id = ballot_item_id
         measure_we_vote_id = ballot_item_we_vote_id
-    elif kind_of_ballot_item == POLITICIAN:
-        politician_id = ballot_item_id
-        politician_we_vote_id = ballot_item_we_vote_id
-    return voter_stop_opposing_save(
+    # We don't mix ballot_item_we_vote_id and politician_we_vote_id
+    # elif kind_of_ballot_item == POLITICIAN:
+    #     politician_id = ballot_item_id
+    #     politician_we_vote_id = ballot_item_we_vote_id
+
+    politician_data_results = \
+        get_politician_data_results(candidate_id, candidate_we_vote_id, politician_id, politician_we_vote_id)
+    politician_id = politician_data_results['politician_id']
+    politician_we_vote_id = politician_data_results['politician_we_vote_id']
+    status += politician_data_results['status']
+
+    results = voter_stop_opposing_save(
         voter_device_id=voter_device_id,
         candidate_id=candidate_id,
         candidate_we_vote_id=candidate_we_vote_id,
@@ -2186,6 +2286,21 @@ def voter_stop_opposing_save_view(request):  # voterStopOpposingSave
         politician_we_vote_id=politician_we_vote_id,
         user_agent_string=user_agent_string,
         user_agent_object=user_agent_object)
+    status += results['status']
+
+    json_data = {
+        'ballot_item_id': results['ballot_item_id'],
+        'ballot_item_we_vote_id': results['ballot_item_we_vote_id'],
+        'kind_of_ballot_item': results['kind_of_ballot_item'],
+        'politician_we_vote_id': results['politician_we_vote_id'],
+        'position': results['position'],
+        'position_we_vote_id': results['position_we_vote_id'],
+        'status': status,
+        'success': results['success'],
+        'voter_device_id': voter_device_id,
+        'voter_id': results['voter_id'],
+    }
+    return HttpResponse(json.dumps(json_data), content_type='application/json')
 
 
 def voter_stop_supporting_save_view(request):  # voterStopSupportingSave
@@ -2195,28 +2310,38 @@ def voter_stop_supporting_save_view(request):  # voterStopSupportingSave
     :param request:
     :return:
     """
-    voter_device_id = get_voter_device_id(request)  # We standardize how we take in the voter_device_id
-    kind_of_ballot_item = request.GET.get('kind_of_ballot_item', "")
     ballot_item_id = request.GET.get('ballot_item_id', 0)
     ballot_item_we_vote_id = request.GET.get('ballot_item_we_vote_id', None)
-    user_agent_string = request.headers['user-agent']
-    user_agent_object = get_user_agent(request)
     candidate_id = 0
     candidate_we_vote_id = None
+    kind_of_ballot_item = request.GET.get('kind_of_ballot_item', "")
     measure_id = 0
     measure_we_vote_id = None
     politician_id = 0
-    politician_we_vote_id = None
+    politician_we_vote_id = request.GET.get('politician_we_vote_id', None)
+    status = ""
+    user_agent_string = request.headers['user-agent']
+    user_agent_object = get_user_agent(request)
+    voter_device_id = get_voter_device_id(request)  # We standardize how we take in the voter_device_id
+
     if kind_of_ballot_item == CANDIDATE:
         candidate_id = ballot_item_id
         candidate_we_vote_id = ballot_item_we_vote_id
     elif kind_of_ballot_item == MEASURE:
         measure_id = ballot_item_id
         measure_we_vote_id = ballot_item_we_vote_id
-    elif kind_of_ballot_item == POLITICIAN:
-        politician_id = ballot_item_id
-        politician_we_vote_id = ballot_item_we_vote_id
-    return voter_stop_supporting_save(
+    # We don't mix ballot_item_we_vote_id and politician_we_vote_id
+    # elif kind_of_ballot_item == POLITICIAN:
+    #     politician_id = ballot_item_id
+    #     politician_we_vote_id = ballot_item_we_vote_id
+
+    politician_data_results = \
+        get_politician_data_results(candidate_id, candidate_we_vote_id, politician_id, politician_we_vote_id)
+    politician_id = politician_data_results['politician_id']
+    politician_we_vote_id = politician_data_results['politician_we_vote_id']
+    status += politician_data_results['status']
+
+    results = voter_stop_supporting_save(
         voter_device_id=voter_device_id,
         candidate_id=candidate_id,
         candidate_we_vote_id=candidate_we_vote_id,
@@ -2226,6 +2351,20 @@ def voter_stop_supporting_save_view(request):  # voterStopSupportingSave
         politician_we_vote_id=politician_we_vote_id,
         user_agent_string=user_agent_string,
         user_agent_object=user_agent_object)
+    status += results['status']
+    json_data = {
+        'ballot_item_id': results['ballot_item_id'],
+        'ballot_item_we_vote_id': results['ballot_item_we_vote_id'],
+        'kind_of_ballot_item': results['kind_of_ballot_item'],
+        'politician_we_vote_id': results['politician_we_vote_id'],
+        'position': results['position'],
+        'position_we_vote_id': results['position_we_vote_id'],
+        'status': status,
+        'success': results['success'],
+        'voter_device_id': voter_device_id,
+        'voter_id': results['voter_id'],
+    }
+    return HttpResponse(json.dumps(json_data), content_type='application/json')
 
 
 def voter_supporting_save_view(request):  # voterSupportingSave
@@ -2235,30 +2374,30 @@ def voter_supporting_save_view(request):  # voterSupportingSave
     :param request:
     :return:
     """
-    voter_device_id = get_voter_device_id(request)  # We standardize how we take in the voter_device_id
-    kind_of_ballot_item = request.GET.get('kind_of_ballot_item', "")
     ballot_item_id = request.GET.get('ballot_item_id', 0)
     ballot_item_we_vote_id = request.GET.get('ballot_item_we_vote_id', None)
-    user_agent_string = request.headers['user-agent']
-    user_agent_object = get_user_agent(request)
     candidate_id = 0
     candidate_we_vote_id = None
+    kind_of_ballot_item = request.GET.get('kind_of_ballot_item', "")
     measure_id = 0
     measure_we_vote_id = None
     politician_id = 0
-    politician_we_vote_id = None
+    politician_we_vote_id = request.GET.get('politician_we_vote_id', None)
     status = ''
+    user_agent_string = request.headers['user-agent']
+    user_agent_object = get_user_agent(request)
+    voter_device_id = get_voter_device_id(request)  # We standardize how we take in the voter_device_id
 
     # Get voter object from voter_device_id
     voter_manager = VoterManager()
     results = voter_manager.retrieve_voter_from_voter_device_id(voter_device_id, read_only=True)
     if results['voter_found']:
         voter = results['voter']
-        voter_is_signed_in = voter.is_signed_in()
+        voter_id = voter.id
     else:
         voter = None
+        voter_id = 0
         status += results['status']
-        voter_is_signed_in = False
 
     if kind_of_ballot_item == CANDIDATE:
         candidate_id = ballot_item_id
@@ -2266,13 +2405,21 @@ def voter_supporting_save_view(request):  # voterSupportingSave
     elif kind_of_ballot_item == MEASURE:
         measure_id = ballot_item_id
         measure_we_vote_id = ballot_item_we_vote_id
-    elif kind_of_ballot_item == POLITICIAN:
-        politician_id = ballot_item_id
-        politician_we_vote_id = ballot_item_we_vote_id
+    # We don't mix ballot_item_we_vote_id and politician_we_vote_id
+    # elif kind_of_ballot_item == POLITICIAN:
+    #     politician_id = ballot_item_id
+    #     politician_we_vote_id = ballot_item_we_vote_id
+
+    politician_data_results = \
+        get_politician_data_results(candidate_id, candidate_we_vote_id, politician_id, politician_we_vote_id)
+    politician_id = politician_data_results['politician_id']
+    politician_we_vote_id = politician_data_results['politician_we_vote_id']
+    status += politician_data_results['status']
+
     results = voter_supporting_save(
         candidate_id=candidate_id,
         candidate_we_vote_id=candidate_we_vote_id,
-        direct_api_call=True,
+        make_heart_favorite_toggle_update=True,
         measure_id=measure_id,
         measure_we_vote_id=measure_we_vote_id,
         politician_id=politician_id,
@@ -2281,75 +2428,20 @@ def voter_supporting_save_view(request):  # voterSupportingSave
         user_agent_object=user_agent_object,
         voter=voter,
         voter_device_id=voter_device_id,
+        voter_id=voter_id,
     )
     status += results['status']
-
-    # Collect the variables needed by organization_follow
-    organization_id = 0
-    organization_we_vote_id = None
-    if voter_is_signed_in:
-        # Unfortunately there isn't a simple way to get organization ids from voter_supporting_save
-        if not positive_value_exists(politician_we_vote_id):
-            if positive_value_exists(politician_id):
-                try:
-                    from politician.models import Politician
-                    politician = Politician.objects.using('readonly').get(id=politician_id)
-                    politician_we_vote_id = politician.we_vote_id
-                except Exception:
-                    pass
-        if not positive_value_exists(politician_we_vote_id):
-            if positive_value_exists(candidate_we_vote_id):
-                try:
-                    from candidate.models import CandidateCampaign
-                    candidate = CandidateCampaign.objects.using('readonly').get(we_vote_id=candidate_we_vote_id)
-                    politician_we_vote_id = candidate.politician_we_vote_id
-                except Exception:
-                    pass
-        if not positive_value_exists(politician_we_vote_id):
-            if positive_value_exists(candidate_id):
-                try:
-                    from candidate.models import CandidateCampaign
-                    candidate = CandidateCampaign.objects.using('readonly').get(id=candidate_id)
-                    politician_we_vote_id = candidate.politician_we_vote_id
-                except Exception:
-                    pass
-        if positive_value_exists(politician_we_vote_id):
-            try:
-                queryset = Organization.objects.using('readonly').filter(politician_we_vote_id=politician_we_vote_id)
-                organization_list = list(queryset)
-                if len(organization_list) > 0:
-                    organization = organization_list[0]
-                    organization_id = organization.id
-                    organization_we_vote_id = organization.we_vote_id
-            except Exception as e:
-                pass
-
-    politician_organization_can_be_followed = \
-        voter_is_signed_in and \
-        positive_value_exists(politician_we_vote_id) and \
-        (positive_value_exists(organization_id) and positive_value_exists(organization_we_vote_id))
-    if politician_organization_can_be_followed:
-        # Now follow the organization
-        org_results = organization_follow(
-            direct_api_call=True,  # True?
-            organization_id=organization_id,
-            organization_we_vote_id=organization_we_vote_id,
-            # organization_twitter_handle=organization_twitter_handle,
-            # organization_follow_based_on_issue=organization_follow_based_on_issue,
-            politician_we_vote_id=politician_we_vote_id,
-            user_agent_string=user_agent_string,
-            user_agent_object=user_agent_object,
-            voter_device_id=voter_device_id,
-        )
-        status += org_results['status']
+    success = results['success']
 
     json_data = {
         'ballot_item_id': results['ballot_item_id'],
         'ballot_item_we_vote_id': results['ballot_item_we_vote_id'],
         'kind_of_ballot_item': results['kind_of_ballot_item'],
+        'politician_we_vote_id': results['politician_we_vote_id'],
+        'position': results['position'],
         'position_we_vote_id': results['position_we_vote_id'],
         'status': status,
-        'success': results['success'],
+        'success': success,
         'voter_device_id': voter_device_id,
         'voter_id': results['voter_id'],
     }
@@ -2552,6 +2644,7 @@ def voter_update_view(request):  # voterUpdate
     :return:
     """
 
+    passkey_received_but_not_accepted = False
     status = ""
     voter_updated = False
     voter_name_needs_to_be_updated_in_activity = False
@@ -2628,9 +2721,14 @@ def voter_update_view(request):  # voterUpdate
             send_journal_list = False
         voter_photo_from_file_reader = request.POST.get('voter_photo_from_file_reader', '')
         voter_photo_changed = positive_value_exists(request.POST.get('voter_photo_changed', False))
+        passkey_to_verify_politician_control = request.POST.get('passkey', False)
         profile_image_type_currently_active = request.POST.get('profile_image_type_currently_active', False)
         profile_image_type_currently_active_changed = \
             positive_value_exists(request.POST.get('profile_image_type_currently_active_changed', False))
+        politician_we_vote_id = request.POST.get('politician_we_vote_id', None)
+        other_ways_to_verify = request.POST.get('other_ways_to_verify', None)
+        politician_page_url = request.POST.get('politician_page_url', None)
+
     else:
         delete_voter_account = positive_value_exists(request.GET.get('delete_voter_account', False))
         facebook_email, facebook_email_changed = \
@@ -2652,6 +2750,7 @@ def voter_update_view(request):  # voterUpdate
         notification_settings_flags = return_flag_value(request, 'notification_settings_flags')
         notification_flag_integer_to_set = return_flag_value(request, 'notification_flag_integer_to_set')
         notification_flag_integer_to_unset = return_flag_value(request, 'notification_flag_integer_to_unset')
+        passkey_to_verify_politician_control = request.GET.get('passkey', False)
         try:
             send_journal_list = request.GET['send_journal_list']
         except KeyError:
@@ -2660,6 +2759,10 @@ def voter_update_view(request):  # voterUpdate
         voter_photo_changed = False
         profile_image_type_currently_active = False
         profile_image_type_currently_active_changed = False
+
+        politician_we_vote_id = request.POST.get('politician_we_vote_id', None)
+        other_ways_to_verify = request.POST.get('other_ways_to_verify', None)
+        politician_page_url = request.POST.get('politician_page_url', None)
 
     # Voter has visited a private-labeled We Vote site, and we want to store that voter's id from another database
     if external_voter_id is not False:
@@ -2674,7 +2777,7 @@ def voter_update_view(request):  # voterUpdate
 
     device_id_results = is_voter_device_id_valid(voter_device_id)
     if not device_id_results['success']:
-        status += "VOTER_DEVICE_ID_NOT_BALLOT " + device_id_results['status']
+        status += "VOTER_DEVICE_ID_NOT_BALLOT " + device_id_results['status'] + voter_device_id + " "
         json_data = {
                 'status':                           status,
                 'success':                          False,
@@ -2761,6 +2864,177 @@ def voter_update_view(request):  # voterUpdate
     voter = voter_results['voter']
     voter_we_vote_id = voter.we_vote_id
 
+    # other ways to verify flags
+    other_ways_to_verify_sent = False
+    other_ways_to_verify_error = False
+
+    # send SendGrid email of other_ways_to_verify form details
+    # Accept other_ways_to_verify (form data), politician_we_vote_id, and politician_page_url
+    # Do not update database
+    if other_ways_to_verify:
+        try:
+            # Implementing using Email Manager
+            email_manager = EmailManager()
+            # create email outbound description
+            outbound_results = email_manager.create_email_outbound_description(
+                recipient_voter_email='support@wevote.us',
+            )
+
+            # schedule email with subject and message
+            politician_id_for_display = politician_we_vote_id if politician_we_vote_id else 'no politician_we_vote_id'
+            email_subject = f"[WeVote] Other Ways to Verify - Politician ID: {politician_id_for_display}"
+            email_context_first_name = first_name or voter.first_name
+            email_context_last_name = last_name or voter.last_name
+            email_message_lines = [
+                "Other Ways to Verify submission:",
+                "",
+                "Voter Context:",
+                f"Voter ID: {voter_id or '(Unknown)'}",
+                f"Voter WeVote ID: {voter_we_vote_id or '(Unknown)'}",
+                f"Voter First Name: {email_context_first_name or '(Unknown)'}",
+                f"Voter Last Name: {email_context_last_name or '(Unknown)'}",
+                f"Voter Email: {voter.email or '(Unknown)'}",
+                f"Link to Voter's Page in Admin: \
+                    {'https://api.wevoteusa.org/voter/edit/'+ voter_we_vote_id if voter_we_vote_id else '(Unknown)'}",
+                f"Politician Page URL: {politician_page_url or '(Unknown)'}",
+                "",
+                "Other Ways to Verify: ",
+                (other_ways_to_verify or "(none)")
+            ]
+            email_message = "\n".join(email_message_lines)
+            email_results = email_manager.schedule_email(
+                email_outbound_description=outbound_results['email_outbound_description'],
+                subject=email_subject,
+                message_text=email_message
+            )
+
+            if email_results['email_scheduled_saved']:
+                status += "OTHER_VERIFY_EMAIL_SCHEDULED "
+                # send scheduled emil
+                send_results = email_manager.send_scheduled_email(
+                    email_scheduled=email_results['email_scheduled']
+                )
+                if send_results['success'] and send_results['email_scheduled_sent']:
+                    status += "OTHER_VERIFY_EMAIL_SENT "
+                    # confirm if email is sent
+                    other_ways_to_verify_sent = True
+                else:
+                    status += send_results['status']
+            else:
+                status += email_results['status']
+        except Exception as e:
+            status += "OTHER_VERIFY_EMAIL_ERROR: " + str(e) + ' '
+            other_ways_to_verify_error = True
+            other_ways_to_verify_sent = False
+
+    campaignx_we_vote_id = ''
+    passkey_verified = False
+    if positive_value_exists(passkey_to_verify_politician_control):
+        # We want to verify politician control
+        if not positive_value_exists(politician_we_vote_id):
+            status += "POLITICIAN_NOT_FOUND_FOR_PASSKEY_VERIFICATION "
+        else:
+            try:
+                from campaign.models import CampaignX
+                campaign = CampaignX.objects.using('readonly').get(linked_politician_we_vote_id=politician_we_vote_id)
+                campaignx_we_vote_id = campaign.we_vote_id
+                if passkey_to_verify_politician_control == campaign.passkey_for_creating_campaign_owner:
+                    passkey_verified = True
+                else:
+                    passkey_received_but_not_accepted = True
+            except Exception as e:
+                status += "ERROR with CampaignX.objects.using('readonly').get: " + str(e) + " "
+
+    do_not_create = False
+    link_already_exists = False
+    if passkey_verified:
+        # Mark that the politician has been claimed
+        try:
+            from politician.models import Politician
+            politician = Politician.objects.get(we_vote_id=politician_we_vote_id)
+            if not positive_value_exists(politician.is_claimed_profile):
+                politician.is_claimed_profile = True
+                politician.save()
+        except Exception as e:
+            status += "ERROR with Politician.objects.get: " + str(e) + " "
+
+        # Add this voter as a CampaignXOwner
+        from campaign.models import CampaignXOwner
+        try:
+            CampaignXOwner.objects.get(
+                campaignx_we_vote_id=campaignx_we_vote_id,
+                voter_we_vote_id=voter_we_vote_id)
+            link_already_exists = True
+        except CampaignXOwner.DoesNotExist:
+            link_already_exists = False
+        except Exception as e:
+            do_not_create = True
+            status += "ADD_CAMPAIGN_OWNER_ALREADY_EXISTS " + str(e) + " "
+        if not do_not_create and not link_already_exists:
+            organization_name = ''
+            we_vote_hosted_profile_image_url_medium = ''
+            we_vote_hosted_profile_image_url_tiny = ''
+            organization_manager = OrganizationManager()
+            if positive_value_exists(voter.linked_organization_we_vote_id):
+                organization_we_vote_id = voter.linked_organization_we_vote_id
+                organization_results = \
+                    organization_manager.retrieve_organization_from_we_vote_id(organization_we_vote_id)
+                if organization_results['organization_found']:
+                    organization_name = organization_results['organization'].organization_name
+                    we_vote_hosted_profile_image_url_medium = \
+                        organization_results['organization'].we_vote_hosted_profile_image_url_medium
+                    we_vote_hosted_profile_image_url_tiny = \
+                        organization_results['organization'].we_vote_hosted_profile_image_url_tiny
+            else:
+                # Create new organization
+                organization_name = voter.get_full_name()
+                organization_image = voter.voter_photo_url()
+                organization_type = INDIVIDUAL
+                create_results = organization_manager.create_organization(
+                    organization_name=organization_name,
+                    organization_image=organization_image,
+                    organization_type=organization_type,
+                    we_vote_hosted_profile_image_url_large=voter.we_vote_hosted_profile_image_url_large,
+                    we_vote_hosted_profile_image_url_medium=voter.we_vote_hosted_profile_image_url_medium,
+                    we_vote_hosted_profile_image_url_tiny=voter.we_vote_hosted_profile_image_url_tiny
+                )
+                if create_results['organization_created']:
+                    organization = create_results['organization']
+                    try:
+                        voter.linked_organization_we_vote_id = organization.we_vote_id
+                        voter.save()
+                    except Exception as e:
+                        status += "UNABLE_TO_LINK_NEW_ORGANIZATION_TO_VOTER: " + str(e) + " "
+
+            # If organization_name is missing, use voter's full name
+            if not positive_value_exists(organization_name) or 'Voter-' in organization_name:
+                voter_full_name = voter.get_full_name(True)
+                if positive_value_exists(voter_full_name) and 'Voter-' not in voter_full_name:
+                    organization_name = voter_full_name
+            # If organization_name is missing, use voter's email
+            if not positive_value_exists(organization_name) and \
+                    positive_value_exists(voter.email) and positive_value_exists(voter.email_ownership_is_verified):
+                organization_name = voter.email
+
+            # Now create new link
+            try:
+                # Create the CampaignXOwner
+                CampaignXOwner.objects.create(
+                    campaignx_we_vote_id=campaignx_we_vote_id,
+                    organization_name=organization_name,
+                    organization_we_vote_id=organization_we_vote_id,
+                    feature_this_profile_image=False,
+                    voter_we_vote_id=voter_we_vote_id,
+                    we_vote_hosted_profile_image_url_medium=we_vote_hosted_profile_image_url_medium,
+                    we_vote_hosted_profile_image_url_tiny=we_vote_hosted_profile_image_url_tiny,
+                    visible_to_public=False)
+
+                messages.add_message(request, messages.INFO, 'New CampaignXOwner created.')
+            except Exception as e:
+                messages.add_message(request, messages.ERROR,
+                                     'Could not create CampaignXOwner.'
+                                     ' {error} [type: {error_type}]'.format(error=e, error_type=type(e)))
+
     if delete_voter_account:
         # We want to fully delete this record
         results = delete_all_voter_information_permanently(voter_to_delete=voter, user=request.user)
@@ -2803,6 +3077,8 @@ def voter_update_view(request):  # voterUpdate
                 'notification_flag_integer_to_set':         notification_flag_integer_to_set,
                 'notification_flag_integer_to_unset':       notification_flag_integer_to_unset,
                 'notification_settings_flags':              voter.notification_settings_flags,
+                'passkey_received_but_not_accepted':        passkey_received_but_not_accepted,
+                'passkey_verified':                         passkey_verified,
                 'profile_image_type_currently_active':      voter.profile_image_type_currently_active,
                 'twitter_profile_image_url_https':          voter.twitter_profile_image_url_https,
                 'voter_device_id':                          voter_device_id,
@@ -2815,6 +3091,8 @@ def voter_update_view(request):  # voterUpdate
                 'we_vote_hosted_profile_twitter_image_url_large': voter.we_vote_hosted_profile_twitter_image_url_large,
                 'we_vote_hosted_profile_uploaded_image_url_large':
                 voter.we_vote_hosted_profile_uploaded_image_url_large,
+                'other_ways_to_verify_sent': other_ways_to_verify_sent,
+                'other_ways_to_verify_error': other_ways_to_verify_error,
             }
         response = HttpResponse(json.dumps(json_data), content_type='application/json')
         return response
@@ -3123,6 +3401,8 @@ def voter_update_view(request):  # voterUpdate
         'notification_settings_flags':              voter.notification_settings_flags,
         'notification_flag_integer_to_set':         notification_flag_integer_to_set,
         'notification_flag_integer_to_unset':       notification_flag_integer_to_unset,
+        'passkey_received_but_not_accepted':        passkey_received_but_not_accepted,
+        'passkey_verified':                         passkey_verified,
         'profile_image_type_currently_active':      voter.profile_image_type_currently_active,
         'twitter_profile_image_url_https':          twitter_profile_image_url_https,
         'voter_device_id':                          voter_device_id,
@@ -3133,6 +3413,8 @@ def voter_update_view(request):  # voterUpdate
         'we_vote_hosted_profile_facebook_image_url_large':  we_vote_hosted_profile_facebook_image_url_large,
         'we_vote_hosted_profile_twitter_image_url_large':   we_vote_hosted_profile_twitter_image_url_large,
         'we_vote_hosted_profile_uploaded_image_url_large':  we_vote_hosted_profile_uploaded_image_url_large,
+        'other_ways_to_verify_sent':                 other_ways_to_verify_sent,
+        'other_ways_to_verify_error':                other_ways_to_verify_error,
     }
 
     response = HttpResponse(json.dumps(json_data), content_type='application/json')

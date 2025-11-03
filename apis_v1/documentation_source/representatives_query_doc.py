@@ -3,6 +3,7 @@
 # -*- coding: UTF-8 -*-
 from wevote_functions.functions_date import DATE_FORMAT_YMD_HMS
 
+
 def representatives_query_doc_template_values(url_root):
     """
     Show documentation about representativesQuery
@@ -34,11 +35,11 @@ def representatives_query_doc_template_values(url_root):
 
     potential_status_codes_list = [
         {
-            'code':         'CANDIDATES_RETRIEVED',
-            'description':  'Candidates were returned.',
+            'code':         'REPRESENTATIVES_RETRIEVED',
+            'description':  'Representatives were returned.',
         },
         {
-            'code':         'NO_CANDIDATES_RETRIEVED',
+            'code':         'NO_REPRESENTATIVES_RETRIEVED',
             'description':  'There are no representatives stored for this Office.',
         },
     ]

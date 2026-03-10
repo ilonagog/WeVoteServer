@@ -186,6 +186,8 @@ class CandidateChangeLog(models.Model):  # Formerly called CandidateLogEntry
     is_official_statement_removed = models.BooleanField(db_index=True, default=None, null=True)
     is_photo_added = models.BooleanField(db_index=True, default=None, null=True)  # New Photo added
     is_photo_removed = models.BooleanField(db_index=True, default=None, null=True)
+    is_threads_handle_added = models.BooleanField(db_index=True, default=None, null=True)
+    is_threads_handle_removed = models.BooleanField(db_index=True, default=None, null=True)
     is_tiktok_added = models.BooleanField(db_index=True, default=None, null=True)
     is_tiktok_removed = models.BooleanField(db_index=True, default=None, null=True)
     is_twitter_handle_added = models.BooleanField(db_index=True, default=None, null=True)  # New Twitter handle saved
@@ -562,6 +564,7 @@ class CandidateListManager(models.Manager):
             candidate_year=0,
             index_start=0,
             candidates_limit=0,
+            has_been_deduplicated=False,
             is_missing_politician_we_vote_id=False,
             limit_to_this_state_code='',
             politician_we_vote_id_list=[],
@@ -574,6 +577,7 @@ class CandidateListManager(models.Manager):
         :param candidate_year:
         :param index_start:
         :param candidates_limit:
+        :param has_been_deduplicated:
         :param is_missing_politician_we_vote_id:
         :param limit_to_this_state_code:
         :param politician_we_vote_id_list:
@@ -592,7 +596,7 @@ class CandidateListManager(models.Manager):
         candidates_returned_count = 0
         candidates_total_count = 0
         status = ""
-        if positive_value_exists(search_string):
+        if search_string and positive_value_exists(search_string):
             try:
                 search_words = search_string.split()
             except Exception as e:
@@ -631,6 +635,8 @@ class CandidateListManager(models.Manager):
                 candidate_query = CandidateCampaign.objects.all()
             if positive_value_exists(candidate_year_integer):
                 candidate_query = candidate_query.filter(candidate_year=candidate_year_integer)
+            if positive_value_exists(has_been_deduplicated):
+                candidate_query = candidate_query.exclude(duplicate_check_last_completed=None)
             if positive_value_exists(is_missing_politician_we_vote_id):
                 candidate_query = candidate_query.filter(
                     Q(politician_we_vote_id__isnull=True) |
@@ -2565,6 +2571,7 @@ class CandidateCampaign(models.Model):
         verbose_name="we vote permanent id for the office this candidate is running for", max_length=255, default=None,
         null=True, blank=True, unique=False, db_index=True)
     contest_office_name = models.CharField(verbose_name="name of the office", max_length=255, null=True, blank=True)
+    contest_office_name_calculated = models.BooleanField(db_index=True, default=False)
     district_name = models.CharField(verbose_name="district name", max_length=255, null=True, blank=True)
     # Which office held is this candidate running for?
     office_held_we_vote_id = models.CharField(max_length=255, default=None, null=True, db_index=True)
@@ -2577,6 +2584,11 @@ class CandidateCampaign(models.Model):
     # The candidate's name.
     candidate_name = models.CharField(verbose_name="candidate name", max_length=255, null=False, blank=False,
                                       db_index=True)
+    duplicate_check_last_completed = models.DateTimeField(null=True)
+    updated_from_politician_completed_first = models.DateTimeField(null=True)
+    updated_from_politician_completed_second = models.DateTimeField(null=True)
+    updates_to_politician_completed = models.DateTimeField(null=True)
+
     # The candidate's name as passed over by Google Civic. We save this so we can match to this candidate even
     # if we edit the candidate's name locally.  Sometimes Google isn't consistent with office names.
     google_civic_candidate_name = models.CharField(verbose_name="candidate name exactly as received from google civic",
@@ -2621,6 +2633,7 @@ class CandidateCampaign(models.Model):
     instagram_followers_count = models.IntegerField(null=True, blank=True)
     # The date of the last election this candidate relates to, converted to integer, ex/ 20201103
     candidate_ultimate_election_date = models.PositiveIntegerField(default=None, null=True)
+    candidate_ultimate_election_date_calculated = models.BooleanField(db_index=True, default=False, null=False)
     # The year this candidate is running for office
     candidate_year = models.PositiveIntegerField(default=None, null=True)
     # State code
@@ -2645,9 +2658,10 @@ class CandidateCampaign(models.Model):
     seo_friendly_path = models.CharField(max_length=255, null=True, unique=False, db_index=True)
     seo_friendly_path_date_last_updated = models.DateTimeField(null=True)
     supporters_count = models.PositiveIntegerField(default=0)  # From linked_campaignx_we_vote_id CampaignX entry
-
+    opposers_count = models.PositiveIntegerField(default=0)  # From linked_campaignx_we_vote_id CampaignX entry
+    threads_handle = models.TextField(blank=True, null=True)
     tiktok_url = models.TextField(blank=True, null=True)
-
+    
     twitter_url = models.URLField(verbose_name='twitter url of candidate', blank=True, null=True)
     twitter_user_id = models.BigIntegerField(verbose_name="twitter id", null=True, blank=True)
     # TODO Update whole system to handle candidate_twitter_handle2 and 3
@@ -5289,3 +5303,60 @@ class CandidateToOfficeLink(models.Model):
                          "" + str(self.contest_office_we_vote_id))
             return
         return office
+
+
+class DeduplicationNeededForStateToday(models.Model):
+    date_now_as_integer = models.PositiveIntegerField(db_index=True, null=True, unique=True)
+    ak_deduplication_needed = models.BooleanField(default=True)
+    al_deduplication_needed = models.BooleanField(default=True)
+    ar_deduplication_needed = models.BooleanField(default=True)
+    az_deduplication_needed = models.BooleanField(default=True)
+    ca_deduplication_needed = models.BooleanField(default=True)
+    co_deduplication_needed = models.BooleanField(default=True)
+    ct_deduplication_needed = models.BooleanField(default=True)
+    dc_deduplication_needed = models.BooleanField(default=True)
+    de_deduplication_needed = models.BooleanField(default=True)
+    fl_deduplication_needed = models.BooleanField(default=True)
+    ga_deduplication_needed = models.BooleanField(default=True)
+    hi_deduplication_needed = models.BooleanField(default=True)
+    ia_deduplication_needed = models.BooleanField(default=True)
+    id_deduplication_needed = models.BooleanField(default=True)
+    il_deduplication_needed = models.BooleanField(default=True)
+    in_deduplication_needed = models.BooleanField(default=True)
+    ks_deduplication_needed = models.BooleanField(default=True)
+    ky_deduplication_needed = models.BooleanField(default=True)
+    la_deduplication_needed = models.BooleanField(default=True)
+    ma_deduplication_needed = models.BooleanField(default=True)
+    md_deduplication_needed = models.BooleanField(default=True)
+    me_deduplication_needed = models.BooleanField(default=True)
+    mi_deduplication_needed = models.BooleanField(default=True)
+    mn_deduplication_needed = models.BooleanField(default=True)
+    mo_deduplication_needed = models.BooleanField(default=True)
+    ms_deduplication_needed = models.BooleanField(default=True)
+    mt_deduplication_needed = models.BooleanField(default=True)
+    na_deduplication_needed = models.BooleanField(default=True)  # For national
+    nc_deduplication_needed = models.BooleanField(default=True)
+    nd_deduplication_needed = models.BooleanField(default=True)
+    ne_deduplication_needed = models.BooleanField(default=True)
+    nh_deduplication_needed = models.BooleanField(default=True)
+    nj_deduplication_needed = models.BooleanField(default=True)
+    nm_deduplication_needed = models.BooleanField(default=True)
+    nv_deduplication_needed = models.BooleanField(default=True)
+    ny_deduplication_needed = models.BooleanField(default=True)
+    oh_deduplication_needed = models.BooleanField(default=True)
+    ok_deduplication_needed = models.BooleanField(default=True)
+    or_deduplication_needed = models.BooleanField(default=True)
+    pa_deduplication_needed = models.BooleanField(default=True)
+    pr_deduplication_needed = models.BooleanField(default=True)  # Puerto Rico
+    ri_deduplication_needed = models.BooleanField(default=True)
+    sc_deduplication_needed = models.BooleanField(default=True)
+    sd_deduplication_needed = models.BooleanField(default=True)
+    tn_deduplication_needed = models.BooleanField(default=True)
+    tx_deduplication_needed = models.BooleanField(default=True)
+    ut_deduplication_needed = models.BooleanField(default=True)
+    va_deduplication_needed = models.BooleanField(default=True)
+    vt_deduplication_needed = models.BooleanField(default=True)
+    wa_deduplication_needed = models.BooleanField(default=True)
+    wi_deduplication_needed = models.BooleanField(default=True)
+    wv_deduplication_needed = models.BooleanField(default=True)
+    wy_deduplication_needed = models.BooleanField(default=True)

@@ -37,6 +37,7 @@ from position.views_admin import positions_sync_out_view
 from representative.views_admin import representatives_sync_out_view
 from stripe_ip_history.views_admin import stripe_ip_history_clear_for_one_ip
 from voter_guide.views_admin import voter_guides_sync_out_view
+from email_outbound import views as email_outbound_views
 
 urlpatterns = [
                   # Actual API Calls
@@ -225,6 +226,8 @@ urlpatterns = [
                           offices_held_for_location_sync_out_view, name='officesHeldForLocationSyncOutView'),
                   re_path(r'^officeRetrieve/', views_misc.office_retrieve_view, name='officeRetrieveView'),
                   re_path(r'^officesSyncOut/', offices_sync_out_view, name='officesSyncOutView'),
+                  re_path(r'^opened/(?P<open_tracking_code>[-\w]+)/',
+                          email_outbound_views.opened_tracking_pixel_view, name='opened_tracking_pixel'),
                   re_path(r'^organizationAnalyticsByVoter/',
                           views_organization.organization_analytics_by_voter_view,
                           name='organizationAnalyticsByVoterView'),
@@ -499,6 +502,8 @@ urlpatterns = [
                           name='voterContactListSaveView'),
                   re_path(r'^voterContactSave/', views_voter.voter_contact_save_view,
                           name='voterContactSaveView'),
+                  re_path(r'^voterReviewedApp/', views_voter.voter_has_reviewed_an_app,
+                          name='voterReviewedApp'),
                   re_path(r'^voterUpdateFips/', views_voter.voter_update_fips_view,
                           name='voterUpdateFipsView'),
                   re_path(r'^voterSMSPhoneNumberRetrieve/', views_voter.voter_sms_phone_number_retrieve_view,
@@ -881,6 +886,8 @@ urlpatterns = [
                   path('docs/voterGuidesFromFriendsUpcomingRetrieve/',
                        views_docs.voter_guides_from_friends_upcoming_retrieve_doc_view,
                        name='voterGuidesFromFriendsUpcomingRetrieveDocs'),
+                  re_path('docs/voterReviewedApp/',
+                       views_docs.voter_reviewed_app_doc_view, name='voterReviewedAppDocs'),
                   path('docs/voterLocationRetrieveFromIP/',
                        views_docs.voter_location_retrieve_from_ip_doc_view, name='voterLocationRetrieveFromIPDocs'),
                   path('docs/voterMergeTwoAccounts/',
@@ -908,6 +915,7 @@ urlpatterns = [
                   path('docs/voterPositionVisibilitySave/',
                        views_docs.voter_position_visibility_save_doc_view, name='voterPositionVisibilitySaveDocs'),
                   path('docs/voterRetrieve/', views_docs.voter_retrieve_doc_view, name='voterRetrieveDocs'),
+                  path('docs/voterReviewApp/', views_docs.voter_reviewed_app_doc_view, name='voterReviewAppDocs'),
                   path('docs/voterSignOut/', views_docs.voter_sign_out_doc_view, name='voterSignOutDocs'),
                   path('docs/voterContactListRetrieve/', views_docs.voter_contact_list_retrieve_doc_view,
                        name='voterContactListRetrieveDocs'),

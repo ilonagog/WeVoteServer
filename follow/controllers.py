@@ -15,7 +15,7 @@ from campaign.controllers import refresh_campaignx_supporters_count_in_all_child
 from campaign.models import CampaignXManager
 from friend.models import FriendManager
 from organization.models import Organization, OrganizationManager
-from politician.models import Politician
+from politician.models import Politician, PoliticianManager
 from position.models import OPPOSE, PositionEntered, PositionForFriends, SUPPORT
 from twitter.models import TwitterUserManager
 from voter.models import VoterManager, fetch_voter_we_vote_id_from_voter_device_link
@@ -44,11 +44,27 @@ def delete_follow_entries_for_voter(voter_to_delete_id):
 
     follow_organization_list = FollowOrganizationList()
     from_follow_list = follow_organization_list.retrieve_follow_organization_by_voter_id(voter_to_delete_id)
-
+    campaignx_manager = CampaignXManager()
+    organization_manager = OrganizationManager()
     for from_follow_entry in from_follow_list:
         try:
+            follow_entry_organization_results = \
+                organization_manager.retrieve_organization_from_id(from_follow_entry.organization_id)
+
+            if follow_entry_organization_results['success'] and follow_entry_organization_results['organization_found']:
+                follow_entry_organization = follow_entry_organization_results['organization']
+
             from_follow_entry.delete()
             follow_entries_deleted += 1
+
+            # Get Campaign associated with deleted follow_entry to update supporters_count
+            if follow_entry_organization and follow_entry_organization.politician_we_vote_id:
+                count_results = campaignx_manager.update_campaignx_supporters_count(
+                    politician_we_vote_id=follow_entry_organization.politician_we_vote_id)
+                if not count_results['success']:
+                    status += count_results['status']
+            else:
+                status += "FOLLOW ENTRY LINKED ORGANIZATION AND CAMPAIGN NOT FOUND "
         except Exception as e:
             follow_entries_not_deleted += 1
             status += "FAILED_DELETING_FROM_FOLLOW_ENTRY: " + str(e) + ' '
@@ -1166,12 +1182,15 @@ def create_followers_from_positions(
 
     # Assemble we_vote_id lists, so we can retrieve the objects to work with them
     for one_position in position_list_to_create_follower:
-        if positive_value_exists(one_position.voter_we_vote_id):
+        if positive_value_exists(one_position.voter_we_vote_id) and \
+                one_position.voter_we_vote_id not in voter_we_vote_id_list_following:
             voter_we_vote_id_list_following.append(one_position.voter_we_vote_id)
         # politician_we_vote_id_list_being_followed.append(one_position.politician_we_vote_id)
         # position_we_vote_id_list_to_create_follower.append(one_position.we_vote_id)
         # We are taking the organization endorsing a politician, and creating a FollowOrganization entry
-        organization_we_vote_id_following_politician_list.append(one_position.organization_we_vote_id)
+        if positive_value_exists(one_position.organization_we_vote_id) and \
+                one_position.organization_we_vote_id not in organization_we_vote_id_following_politician_list:
+            organization_we_vote_id_following_politician_list.append(one_position.organization_we_vote_id)
 
     # Retrieve all relevant voters associated with positions, in a single query, so we can access voter.is_signed_in
     #  For friends_only_positions, we want to only create a follow_organization entry if the voter is signed in

@@ -4302,13 +4302,25 @@ def voter_retrieve_for_api(  # voterRetrieve
         for team_member in team_member_list:
             can_edit_campaignx_owned_by_organization_list.append(team_member.organization_we_vote_id)
 
+        if not hasattr(voter, 'app_review_state'):
+            voter.app_review_state = 'NONE'
+        if not hasattr(voter, 'app_review_date'):
+            voter.app_review_date = ''
+        if not hasattr(voter, 'app_review_version'):
+            voter.app_review_version = ''
+        if not hasattr(voter, 'app_review_platform'):
+            voter.app_review_platform = ''
+
         # print('voterRetrieve status', status, ', voter.email ', voter.email, ', full name ', voter.get_full_name(), ',
         #   voter_photo_url_medium', we_vote_hosted_profile_image_url_medium )
         json_data = {
             'status':                           status,
             'success':                          True,
             'address':                          address_results,
-            'can_edit_campaignx_owned_by_organization_list': can_edit_campaignx_owned_by_organization_list,
+            'app_review_state':                 voter.app_review_state,
+            'app_review_date':                  str(voter.app_review_date),
+            'app_review_version':               str(voter.app_review_version),
+            'app_review_platform':              str(voter.app_review_platform),
             'date_joined':                      voter.date_joined.strftime(DATE_FORMAT_YMD_HMS),  # '%Y-%m-%d %H:%M:%S'
             'email':                            voter.email,
             'facebook_email':                   voter.facebook_email,

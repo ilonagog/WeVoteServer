@@ -42,6 +42,7 @@ urlpatterns = [
     re_path(r'^bookmark/', include(('bookmark.urls', 'bookmark'), namespace="bookmark")),
     re_path(r'^c/', include(('candidate.urls', 'candidate'), namespace="candidate")),
     re_path(r'^campaign/', include(('campaign.urls', 'campaign'), namespace="campaign")),
+    re_path(r'^cloudwatch_logging/', include(('cloudwatch_logging.urls', 'cloudwatch_logging'), namespace="cloudwatch_logging")),
     re_path(r'^challenge/', include(('challenge.urls', 'challenge'), namespace="challenge")),
     re_path(r'^e/', include(('election.urls', 'election'), namespace="election")),
     re_path(r'^email/', include(('email_outbound.urls', 'email_outbound'), namespace="email_outbound")),
@@ -89,6 +90,8 @@ urlpatterns = [
                     namespace="import_export_wikipedia")),
     re_path(r'^import_export_endorsements/', include((
         'import_export_endorsements.urls','import_export_endorsements'), namespace="import_export_endorsements")),
+    re_path(r'^import_export_jira/',
+            include(('import_export_jira.urls', 'import_export_jira'), namespace="import_export_jira")),
     re_path(r'^info/', include(('quick_info.urls', 'quick_info'), namespace="quick_info")),
     re_path(r'^issue/', include(('issue.urls', 'issue'), namespace="issue")),
     re_path(r'^m/', include(('measure.urls', 'measure'), namespace="measure")),

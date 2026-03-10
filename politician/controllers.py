@@ -455,10 +455,11 @@ def find_candidates_to_link_to_this_politician(politician=None):
     """
     if not hasattr(politician, 'we_vote_id'):
         return []
+    related_candidate_list = []
     from candidate.models import CandidateCampaign
     try:
-        related_candidate_list = CandidateCampaign.objects.using('readonly').all()
-        related_candidate_list = related_candidate_list.exclude(
+        queryset = CandidateCampaign.objects.using('readonly').all()
+        queryset = queryset.exclude(
             politician_we_vote_id=politician.we_vote_id)
 
         filters = []
@@ -523,9 +524,10 @@ def find_candidates_to_link_to_this_politician(politician=None):
             for item in filters:
                 final_filters |= item
 
-            related_candidate_list = related_candidate_list.filter(final_filters)
+            queryset = queryset.filter(final_filters)
 
-        related_candidate_list = related_candidate_list.order_by('candidate_name')[:20]
+        queryset = queryset.order_by('candidate_name')[:20]
+        related_candidate_list = list(queryset)
     except Exception as e:
         related_candidate_list = []
     return related_candidate_list
@@ -850,6 +852,7 @@ def generate_politician_dict_from_politician_object(politician=None):
     politician_dict = {
         'ballot_guide_official_statement':  politician.ballot_guide_official_statement,
         'ballotpedia_politician_url':       politician.ballotpedia_politician_url,
+        'bluesky_handle':                   politician.bluesky_handle,
         'final_election_date_in_past':      final_election_date_in_past,
         'instagram_handle':                 instagram_handle,
         'is_claimed_profile':               positive_value_exists(politician.is_claimed_profile),
@@ -875,6 +878,7 @@ def generate_politician_dict_from_politician_object(politician=None):
         'state_code':                       politician.state_code,
         'supporters_count':                 politician.supporters_count,
         # 'supporters_count_victory_goal':    politician.supporters_count_victory_goal,
+        'threads_handle':                   politician.threads_handle,
         'twitter_followers_count':          politician.twitter_followers_count,
         # 'visible_on_this_site':             politician.visible_on_this_site,
         'we_vote_hosted_profile_ballotpedia_image_url_large':   politician.we_vote_hosted_profile_ballotpedia_image_url_large,
@@ -2330,6 +2334,8 @@ def politician_save_for_api(  # politicianSave
         ballot_guide_official_statement_changed='',
         campaign_website='',
         campaign_website_changed=False,
+        political_party='',
+        political_party_changed=False,
         politician_name='',
         politician_name_changed=False,
         politician_photo_from_file_reader='',
@@ -2405,6 +2411,8 @@ def politician_save_for_api(  # politicianSave
         if campaign_website_changed:
             # Note we are adding campaign_website to the the first politician_url spot below
             pass
+        if political_party_changed:
+            update_values['political_party'] = political_party
         if politician_name_changed:
             update_values['politician_name'] = politician_name
         if profile_image_type_currently_active_changed:
@@ -2421,6 +2429,7 @@ def politician_save_for_api(  # politicianSave
         # Make sure we have minimum required data
         update_values = {
             'ballot_guide_official_statement':      ballot_guide_official_statement,
+            'political_party':                      political_party,
             'politician_name':                      politician_name,
             'profile_image_type_currently_active':  profile_image_type_currently_active,
             'state_code':                           state_code,

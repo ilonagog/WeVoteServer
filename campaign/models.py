@@ -119,6 +119,7 @@ class CampaignX(models.Model):
     #  This organization_we_vote_id field (cached, not the master link) is the
     #  "Endorser" object attached to that politician.
     organization_we_vote_id = models.CharField(max_length=255, null=True, db_index=True)
+    # passkey_for_creating_campaign_owner is also used for politician_passkey
     passkey_for_creating_campaign_owner = models.CharField(max_length=25, null=True, db_index=True)
     politician_starter_list_serialized = models.TextField(null=True, blank=True)
     profile_image_background_color = models.CharField(blank=True, null=True, max_length=7)
@@ -2472,7 +2473,8 @@ class CampaignXManager(models.Manager):
                     campaignx.linked_politician_we_vote_id = update_values['linked_politician_we_vote_id']
                     campaignx_changed = True
                 if 'opposers_count' in update_values \
-                        and positive_value_exists(update_values['opposers_count']):
+                    and (positive_value_exists(update_values['opposers_count']) or \
+                         update_values['opposers_count'] == 0):
                     campaignx.opposers_count = update_values['opposers_count']
                     campaignx_changed = True
                 if 'politician_delete_list_serialized' in update_values \
@@ -2533,7 +2535,8 @@ class CampaignXManager(models.Manager):
                             update_values['politician_starter_list_serialized']
                         campaignx_changed = True
                 if 'supporters_count' in update_values \
-                        and positive_value_exists(update_values['supporters_count']):
+                        and (positive_value_exists(update_values['supporters_count']) or \
+                            update_values['supporters_count'] == 0):
                     campaignx.supporters_count = update_values['supporters_count']
                     campaignx_changed = True
                 if campaignx_changed:

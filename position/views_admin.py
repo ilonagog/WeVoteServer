@@ -274,143 +274,29 @@ def position_list_view(request):
     # ################################################
     # Maintenance script section START
     # ################################################
+
+    # Find positions about candidates that are not linked to politicians. Get the politician_we_vote_id from the
+    #  candidate (if linked) and update the position with that politician_we_vote_id.
     error_message_to_print = ''
     info_message_to_print = ''
     number_to_update = 10
     if politician_we_vote_id_analyzed_on:
-        from politician.models import Politician
-        queryset = PositionEntered.objects.all()
-        queryset = queryset.filter(politician_we_vote_id_analyzed=False)
-        queryset = queryset.exclude(
-            Q(candidate_campaign_we_vote_id__isnull=True) | Q(candidate_campaign_we_vote_id=""))
-        # For now, we ignore Positions incorrectly linked to politician_we_vote_ids that have been deleted/merged.
-        # Only update entries without a politician_we_vote_id
-        queryset = queryset.filter(politician_we_vote_id__isnull=True)
-        if positive_value_exists(state_code):
-            queryset = queryset.filter(state_code__iexact=state_code)
-        total_to_convert = queryset.count()
-        total_to_convert_after = total_to_convert - number_to_update if total_to_convert > number_to_update else 0
-
-        # Get 1000 candidate_we_vote_id values
-        candidate_queryset = queryset.values_list('candidate_campaign_we_vote_id', flat=True).distinct()
-        candidate_we_vote_id_list = list(candidate_queryset[:number_to_update])
-        queryset = queryset.filter(candidate_campaign_we_vote_id__in=candidate_we_vote_id_list)
-
-        position_list_to_convert = list(queryset[:number_to_update])
-
-        info_message_to_print += \
-            "politician_we_vote_id_analyzed_on: {total_to_convert:,} total_to_convert. " \
-            "{total_to_convert_after:,} remaining." \
-            "".format(
-                total_to_convert_after=total_to_convert_after,
-                total_to_convert=total_to_convert)
-
-        update_list = []
-        if len(update_list) > 0:
-            try:
-                updates_made = Politician.objects.bulk_update(update_list, ['linked_politician_we_vote_id'])
-                info_message_to_print += \
-                    "UPDATES MADE: {updates_made:,} politicians updated with new linked_campaignx_we_vote_id. " \
-                    "{total_to_convert_after:,} remaining." \
-                    "".format(
-                        total_to_convert_after=total_to_convert_after,
-                        updates_made=updates_made)
-            except Exception as e:
-                updates_error = True
-                error_message_to_print += \
-                    "ERROR with politician_we_vote_id_analyzed_on: {e} " \
-                    "".format(e=e)
+        from position.controllers_data_cleaning import add_politician_we_vote_ids_to_candidate_positions
+        results = add_politician_we_vote_ids_to_candidate_positions(
+            number_to_update=number_to_update,
+            state_code=state_code)
+        if positive_value_exists(results['status']):
+            messages.add_message(request, messages.INFO, results['status'])
 
     # Added to campaignx object the variable 'supporters_count_to_update_with_bulk_script'
     # create_followers_from_positions_on passed in as URL variable above
     if create_followers_from_positions_on:
-        from follow.controllers import create_followers_from_positions
-        from campaign.controllers import delete_campaignx_supporters_after_positions_removed, \
-            refresh_campaignx_supporters_count_in_all_children, \
-            refresh_campaignx_supporters_count_for_campaignx_we_vote_id_list
-        campaignx_we_vote_id_list_to_refresh = []
-        # #############################
-        # Create FollowOrganization entries
-        # From PUBLIC positions
-        number_to_create = 2500
-        t0 = time()
-        results = create_followers_from_positions(
-            friends_only_positions=False,
-            number_to_create=number_to_create,
+        from position.controllers_data_cleaning import create_followers_from_positions_batch
+        results = create_followers_from_positions_batch(
+            number_to_create=100,
             state_code=state_code)
-        t1 = time()
-        if positive_value_exists(results['error_message_to_print']):
-            error_message_to_print += results['error_message_to_print']
-        if positive_value_exists(results['info_message_to_print']):
-            info_message_to_print += results['info_message_to_print']
-        campaignx_we_vote_id_list_changed = results['campaignx_we_vote_id_list_to_refresh']
-        if len(campaignx_we_vote_id_list_changed) > 0:
-            campaignx_we_vote_id_list_to_refresh = \
-                list(set(campaignx_we_vote_id_list_changed + campaignx_we_vote_id_list_to_refresh))
-        # From FRIENDS_ONLY positions
-        t2 = time()
-        results = create_followers_from_positions(
-            friends_only_positions=True,
-            number_to_create=number_to_create,
-            state_code=state_code)
-        t3 = time()
-        if positive_value_exists(results['error_message_to_print']):
-            error_message_to_print += results['error_message_to_print']
-        if positive_value_exists(results['info_message_to_print']):
-            info_message_to_print += results['info_message_to_print']
-        campaignx_we_vote_id_list_changed = results['campaignx_we_vote_id_list_to_refresh']
-        if len(campaignx_we_vote_id_list_changed) > 0:
-            campaignx_we_vote_id_list_to_refresh = \
-                list(set(campaignx_we_vote_id_list_changed + campaignx_we_vote_id_list_to_refresh))
-        # # #############################
-        # # Delete campaignx_supporters
-        # delete_from_friends_only_positions = False
-        # results = delete_campaignx_supporters_after_positions_removed(
-        #     request,
-        #     friends_only_positions=False,
-        #     state_code=state_code)
-        # campaignx_we_vote_id_list_changed = results['campaignx_we_vote_id_list_to_refresh']
-        # if len(campaignx_we_vote_id_list_changed) > 0:
-        #     campaignx_we_vote_id_list_to_refresh = \
-        #         list(set(campaignx_we_vote_id_list_changed + campaignx_we_vote_id_list_to_refresh))
-        # if not positive_value_exists(results['campaignx_supporter_entries_deleted']):
-        #     delete_from_friends_only_positions = True
-        # if delete_from_friends_only_positions:
-        #     results = delete_campaignx_supporters_after_positions_removed(
-        #         request,
-        #         friends_only_positions=True,
-        #         state_code=state_code)
-        #     campaignx_we_vote_id_list_changed = results['campaignx_we_vote_id_list_to_refresh']
-        #     if len(campaignx_we_vote_id_list_changed) > 0:
-        #         campaignx_we_vote_id_list_to_refresh = \
-        #             list(set(campaignx_we_vote_id_list_changed + campaignx_we_vote_id_list_to_refresh))
-
-        # #############################
-        # Now refresh the campaignx.supporters count and in all the objects that cache this count
-        if len(campaignx_we_vote_id_list_to_refresh) > 0:
-            results = refresh_campaignx_supporters_count_for_campaignx_we_vote_id_list(
-                campaignx_we_vote_id_list=campaignx_we_vote_id_list_to_refresh)
-            status += results['status']
-            if positive_value_exists(results['error_message_to_print']):
-                error_message_to_print += results['error_message_to_print']
-            if positive_value_exists(results['update_message']):
-                update_message += results['update_message']
-
-        # Now push updates to campaignx entries out to candidates and politicians linked to the campaignx entries
-        if len(campaignx_we_vote_id_list_to_refresh) > 0:
-            results = refresh_campaignx_supporters_count_in_all_children(
-                request,
-                campaignx_we_vote_id_list=campaignx_we_vote_id_list_to_refresh)
-            status += results['status']
-            if positive_value_exists(results['update_message']):
-                update_message += results['update_message']
-        diff_t0_t1 = t1 - t0
-        diff_t2_t3 = t3 - t2
-        # messages.add_message(
-        #     request, messages.INFO,
-        #     "t0 -> t1 took {:.6f} seconds, ".format(diff_t0_t1) +
-        #     "t2 -> t3 took {:.6f} seconds ".format(diff_t2_t3)
-        # )
+        if positive_value_exists(results['status']):
+            messages.add_message(request, messages.INFO, results['status'])
 
     # ################################################
     # Maintenance script section END

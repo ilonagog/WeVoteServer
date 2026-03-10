@@ -1,0 +1,700 @@
+{# templates/email_outbound/audience_builder_list.html #}
+  
+{% extends "template_base.html" %}
+
+{% block title %}Audience Builders{% endblock %}
+
+{% block content %}
+{% load static %}
+{% load template_filters %}
+{% load humanize %}
+{% include "admin_tools/loading_banner.html" %}
+
+<!-- Audience Builder Drawer CSS -->
+<style>
+    {% include "email_outbound/css/_audience_builder_drawer_styles.html" %}
+</style>
+
+<!-- Audience Builder Drawer Javascript -->
+<script>
+    {% include "email_outbound/js/_audience_builder_drawer_js.html" %}
+</script>
+
+<style>
+  .wv-row { display:flex; align-items:center; gap:12px; flex-wrap:wrap; }
+  .wv-spacer { flex:1; }
+  .audience-builder-section { margin-top: 18px; }
+  .wv-muted { color:#64748b; font-size: 0.95rem; }
+  details.wv-accordion { border:1px solid #e5e7eb; border-radius:10px; padding:10px; background:#fff; }
+  details.wv-accordion + details.wv-accordion { margin-top:10px; }
+  summary.wv-accordion-head { cursor:pointer; display:flex; align-items:center; justify-content:space-between; list-style:none; }
+  summary.wv-accordion-head::-webkit-details-marker { display:none; }
+  .wv-accordion-title {display: flex; align-items: center;}
+  .chevron {transition: transform 180ms ease; stroke: currentColor; fill: none; stroke-width: 2;}
+  .wv-accordion[open] > .wv-accordion-head > .wv-accordion-title > .chevron { transform: rotate(180deg); }
+  .wv-actions { display:flex; gap:6px; align-items:center; }
+  .wv-kebab { border:1px solid #e5e7eb; border-radius:8px; background:#f8fafc; padding:6px 10px; }
+  .wv-inline-form { display:inline-block; margin:0; }
+  .wv-dropdown { position:relative; display:inline-block; }
+  .wv-dropdown-menu { position:absolute; right:0; top:110%; min-width:180px; background:#fff; border:1px solid #e5e7eb; border-radius:10px; padding:6px; display:none; z-index:10; }
+  .wv-dropdown.open .wv-dropdown-menu { display:block; }
+  .wv-menu-btn { width:100%; text-align:left; border:none; background:#fff; padding:8px 10px; border-radius:8px; }
+  .wv-menu-btn:hover { background:#f1f5f9; }
+  .wv-list { margin:10px 0 0; border-top:1px dashed #e5e7eb; padding-top:8px; }
+  .wv-item { display:flex; align-items:center; justify-content:space-between; padding:8px 4px; }
+  .wv-tag { display:inline-block; margin-left: 4px; padding:2px 8px; border:1px solid #e5e7eb; border-radius:999px; font-size:12px; color:#475569; }
+  .wv-modal-backdrop { position:fixed; inset:0; background:rgba(0,0,0,0.45); display:none; align-items:center; justify-content:center; z-index:1000; }
+  .wv-modal-backdrop.open { display:flex; }
+  .wv-modal { background:#fff; border-radius:12px; padding:20px; width:100%; max-width:520px; box-shadow:0 10px 30px rgba(0,0,0,0.2); }
+  .wv-modal-header { display:flex; align-items:center; justify-content:space-between; margin-bottom:8px; }
+  .wv-input { width:100%; padding:10px 12px; border:1px solid #cbd5e1; border-radius: 8px; outline:none; }
+  .wv-input:focus { border-color:#2563eb; box-shadow: 0 0 0 3px rgba(37,99,235,.15); }
+  .wv-select { width:100%; padding:10px 12px; border:1px solid #cbd5e1; border-radius: 8px; outline:none; }
+  .wv-actions-right { display:flex; gap:8px; justify-content:flex-end; margin-top: 12px; }
+  .wv-muted-section { background:#f8fafc; border:1px solid #e5e7eb; border-radius:10px; padding:12px; }
+
+</style>
+
+<a href="{% url 'email_outbound:email_campaign_list' %}?google_civic_election_id={{ google_civic_election_id }}&state_code={{ state_code }}">
+  &lt; Back to Email Campaigns
+</a>
+
+<div class="wv-row" style="margin-top:10px;">
+  <h1 style="margin:0;">Audience Builders</h1>
+  <div class="wv-spacer"></div>
+
+  {# Create Folder button => modal #}
+  <button id="openCreateFolder" class="btn btn-default">Create folder</button>
+
+  {# Create Audience Builder (unfiled by default) #}
+  <form class="wv-inline-form" method="post" action="{{ process_url }}">
+    {% csrf_token %}
+    <input type="hidden" name="google_civic_election_id" value="{{ google_civic_election_id }}">
+    <input type="hidden" name="state_code" value="{{ state_code }}">
+    <input type="hidden" name="action" value="create_audience_builder">
+    <button class="btn btn-primary" type="button"  onclick="openSavedAudiencesDrawer('0')">Create Audience Builder</button>
+  </form>
+</div>
+{# ---------------- ACTIVE FOLDERS ---------------- #}
+<div class="audience-builder-section">
+  {% for f in folders_active %}
+      {% with list=audience_builders_by_folder|get_value_from_dict:f.id %}
+        <details class="wv-accordion" open>
+          <summary class="wv-accordion-head">
+            <div class="wv-accordion-title" >
+                <svg class="chevron" width="25" height="25" viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M7 10l5 5 5-5"></path>
+                </svg>
+                <strong>{{ f.audience_builder_name }}</strong>
+            </div>
+            <div class="wv-actions">
+              {% if list %}
+                  <span class="wv-tag">{{ list|length }} Audience Builders</span>
+              {% else %}
+                  <span class="wv-tag">0 Audience Builders</span>
+              {% endif %}
+              <div class="wv-dropdown">
+                <button type="button" class="wv-kebab js-dd">•••</button>
+                <div class="wv-dropdown-menu">
+
+                  {# Create Audience Builder in this folder #}
+                  <form class="wv-inline-form" method="post" action="{{ process_url }}">
+                    {% csrf_token %}
+                    <input type="hidden" name="google_civic_election_id" value="{{ google_civic_election_id }}">
+                    <input type="hidden" name="state_code" value="{{ state_code }}">
+                    <input type="hidden" name="action" value="create_audience_builder">
+                    <input type="hidden" name="folder_id" value="{{ f.id }}">
+                    <button class="wv-menu-btn" type="submit">Create audience builder</button>
+                  </form>
+
+                  {# Other folder options#}
+                  <button class="wv-menu-btn js-open-rename" data-folder-id="{{ f.id }}" data-folder-name="{{ f.audience_builder_name }}">Rename folder</button>
+                  <button class="wv-menu-btn js-open-archive-folder" data-folder-id="{{ f.id }}" data-folder-name="{{ f.audience_builder_name }}">Archive folder</button>
+                  <button class="wv-menu-btn js-open-delete-folder" data-folder-id="{{ f.id }}" data-folder-name="{{ f.audience_builder_name }}">Delete folder</button>
+                </div>
+              </div>
+            </div>
+          </summary>
+
+          <div class="wv-list">
+              {% if list %}
+                {% for audience_builder_in_folder in list %}
+                  <div class="wv-item" id="audience_builder_row_{{ audience_builder_in_folder.id }}">
+                    <div>
+                      <span onclick="openSavedAudiencesDrawer('{{ audience_builder_in_folder.id }}')" style="color: #337AB7; cursor: pointer; font-size: 1.2em;">
+                          <strong>{{ audience_builder_in_folder.audience_builder_name }}</strong>
+                      </span>
+                      {% if audience_builder_in_folder.subject %}<span class="wv-muted">— {{ audience_builder_in_folder.subject }}</span>{% endif %}
+                    </div>
+                    <div class="wv-actions">
+{#                      <a class="btn btn-default"#}
+{#                         href="{{ audience_builder_edit_url }}?google_civic_election_id={{ google_civic_election_id }}&state_code={{ state_code }}&audience_builder_id={{ audience_builder_in_folder.id }}"#}
+{#                      >#}
+{#                          Edit#}
+{#                      </a>#}
+                      <input type="button"
+                             class="btn btn-default"
+                             onclick="openSavedAudiencesDrawer('{{ audience_builder_in_folder.id }}')"
+                             value="Edit"
+                      />
+
+                      {# Other Audience Builder Options#}
+                      <div class="wv-dropdown">
+                        <button type="button" class="wv-kebab js-dd">•••</button>
+                        <div class="wv-dropdown-menu">
+                          <button class="wv-menu-btn js-open-move" data-audience-builder-id="{{ audience_builder_in_folder.id }}" data-current-folder-id="{{ f.id|default_if_none:'null' }}">Change folder</button>
+                          <button class="wv-menu-btn js-open-archive-audience-builder" data-audience-builder-id="{{ audience_builder_in_folder.id }}" data-audience-builder-name="{{ audience_builder_in_folder.audience_builder_name }}">Archive</button>
+                          <button class="wv-menu-btn js-open-delete-audience-builder" data-audience-builder-id="{{ audience_builder_in_folder.id }}" data-audience-builder-name="{{ audience_builder_in_folder.audience_builder_name }}">Delete</button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                {% endfor %}
+              {% else %}
+                <div class="wv-muted">No Audience Builders in this folder yet.</div>
+              {% endif %}
+          </div>
+        </details>
+      {% endwith %}
+  {% empty %}
+    <div class="wv-muted-section">No folders yet</div>
+  {% endfor %}
+
+  {# ---------------- UNFILED FOLDER ---------------- #}
+  <details class="wv-accordion" style="margin-top:10px;" open>
+    <summary class="wv-accordion-head">
+      <div class="wv-accordion-title" >
+        <svg class="chevron" width="25" height="25" viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M7 10l5 5 5-5"></path>
+        </svg>
+        <strong>Unfiled</strong>
+      </div>
+      <div class="wv-actions">
+        {% if unfiled_audience_builders %}
+            <span class="wv-tag">{{ unfiled_audience_builders|length }} Audience Builders</span>
+        {% else %}
+            <span class="wv-tag">0 Audience Builders</span>
+        {% endif %}
+      </div>
+    </summary>
+
+    <div class="wv-list">
+      {% if unfiled_audience_builders %}
+        {% for audience_builder_unfiled in unfiled_audience_builders %}
+          <div class="wv-item" id="audience_builder_row_unfiled_{{ audience_builder_unfiled.id }}">
+            <div>
+              <span onclick="openSavedAudiencesDrawer('{{ audience_builder_unfiled.id }}')" style="color: #337AB7; cursor: pointer; font-size: 1.2em;">
+                <strong>{{ audience_builder_unfiled.audience_builder_name }}</strong>
+              </span>
+              {% if audience_builder_unfiled.subject %}<span class="wv-muted">— {{ audience_builder_unfiled.subject }}</span>{% endif %}
+            </div>
+            <div class="wv-actions">
+{#              <a class="btn btn-default" href="{{ audience_builder_edit_url }}?google_civic_election_id={{ google_civic_election_id }}&state_code={{ state_code }}&audience_builder_id={{ audience_builder_unfiled.id }}">#}
+{#                  Edit</a>#}
+              <input type="button"
+                     class="btn btn-default"
+                     onclick="openSavedAudiencesDrawer('{{ audience_builder_unfiled.id }}')"
+                     value="Edit"
+              />
+
+              <div class="wv-dropdown">
+                <button type="button" class="wv-kebab js-dd">•••</button>
+                <div class="wv-dropdown-menu">
+                  <button class="wv-menu-btn js-open-move" data-audience-builder-id="{{ audience_builder_unfiled.id }}" data-current-folder-id="null">Change folder</button>
+                  <button class="wv-menu-btn js-open-archive-audience-builder" data-audience-builder-id="{{ audience_builder_unfiled.id }}" data-audience-builder-name="{{ audience_builder_unfiled.audience_builder_name }}">Archive</button>
+                  <button class="wv-menu-btn js-open-delete-audience-builder" data-audience-builder-id="{{ audience_builder_unfiled.id }}" data-audience-builder-name="{{ audience_builder_unfiled.audience_builder_name }}">Delete</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        {% endfor %}
+      {% else %}
+        <div class="wv-muted">No unfiled Audience Builders.</div>
+      {% endif %}
+    </div>
+  </details>
+</div>
+
+{# ---------------- ARCHIVED FOLDERS ---------------- #}
+<div class="audience-builder-section">
+  <details class="wv-accordion">
+    <summary class="wv-accordion-head">
+        <div class="wv-accordion-title" >
+            <svg class="chevron" width="25" height="25" viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M7 10l5 5 5-5"></path>
+            </svg>
+
+            <h4 style="margin:0;">Archived Folders</h4>
+        </div>
+    </summary>
+
+    {% if folders_archived %}
+      {% for f in folders_archived %}
+        {% with list=audience_builders_by_folder|get_value_from_dict:f.id %}
+            <details class="wv-accordion" style="margin-top:10px;">
+              <summary class="wv-accordion-head">
+                <div class="wv-accordion-title" >
+                    <svg class="chevron" width="25" height="25" viewBox="0 0 24 24" aria-hidden="true">
+                        <path d="M7 10l5 5 5-5"></path>
+                    </svg>
+                    <strong>{{ f.audience_builder_name }}</strong>
+                    <span class="wv-tag" title="Archived folder">Archived</span>
+                </div>
+                <div class="wv-actions">
+                  {% if list %}
+                      <span class="wv-tag">{{ list|length }} Audience Builders</span>
+                  {% else %}
+                      <span class="wv-tag">0 Audience Builders</span>
+                  {% endif %}
+                  <div class="wv-dropdown">
+                    <button type="button" class="wv-kebab js-dd">•••</button>
+                    <div class="wv-dropdown-menu">
+                      <button class="wv-menu-btn js-open-unarchive-folder" data-folder-id="{{ f.id }}" data-folder-name="{{ f.audience_builder_name }}">Unarchive folder</button>
+                    </div>
+                  </div>
+                </div>
+              </summary>
+
+              {# Audience Builders in archived folder #}
+              <div class="wv-list">
+
+                  {% if list %}
+                    {% for one_audience_builder in list %}
+                      <div class="wv-item">
+                        <div>
+                          <strong>{{ one_audience_builder.audience_builder_name }}</strong>
+                          {% if one_audience_builder.subject %}<span class="wv-muted">— {{ one_audience_builder.subject }}</span>{% endif %}
+                        </div>
+                        <div class="wv-actions">
+{#                          <a class="btn btn-default" href="{{ audience_builder_edit_url }}?google_civic_election_id={{ google_civic_election_id }}&state_code={{ state_code }}&audience_builder_id={{ one_audience_builder.id }}">#}
+{#                              Edit</a>#}
+                          <input type="button"
+                                 class="btn btn-default"
+                                 onclick="openSavedAudiencesDrawer('{{ one_audience_builder.id }}')"
+                                 value="Edit"
+                          />
+                          <div class="wv-dropdown">
+                            <button type="button" class="wv-kebab js-dd">•••</button>
+                            <div class="wv-dropdown-menu">
+                              <button class="wv-menu-btn js-open-move" data-audience-builder-id="{{ one_audience_builder.id }}" data-current-folder-id="{{ f.id }}">Change folder</button>
+                              <button class="wv-menu-btn js-open-archive-audience-builder" data-audience-builder-id="{{ one_audience_builder.id }}" data-audience-builder-name="{{ one_audience_builder.audience_builder_name }}">Archive</button>
+                              <button class="wv-menu-btn js-open-delete-audience-builder" data-audience-builder-id="{{ one_audience_builder.id }}" data-audience-builder-name="{{ one_audience_builder.audience_builder_name }}">Delete</button>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    {% endfor %}
+                  {% else %}
+                    <div class="wv-muted">No lists from Audience Builders in this archived folder.</div>
+                  {% endif %}
+              </div>
+            </details>
+        {% endwith %}
+      {% endfor %}
+    {% else %}
+      <div class="wv-muted-section">No archived folders.</div>
+    {% endif %}
+  </details>
+</div>
+
+{# ---------------- ARCHIVED AUDIENCE BUILDER LIST ---------------- #}
+<div class="audience-builder-section">
+  <details class="wv-accordion">
+    <summary class="wv-accordion-head">
+        <div class="wv-accordion-title" >
+            <svg class="chevron" width="25" height="25" viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M7 10l5 5 5-5"></path>
+            </svg>
+
+            <h4 style="margin:0;">Archived Audience Builders</h4>
+        </div>
+        <div class="wv-actions">
+          {% if archived_audience_builders %}
+              <span class="wv-tag">{{ archived_audience_builders|length }} Audience Builders</span>
+          {% else %}
+              <span class="wv-tag">0 Audience Builders</span>
+          {% endif %}
+        </div>
+
+    </summary>
+
+    {% if archived_audience_builders %}
+      <div class="wv-list">
+        {% for archived_audience_builder in archived_audience_builders %}
+          <div class="wv-item">
+            <div>
+              <strong>{{ archived_audience_builder.audience_builder_name }}</strong>
+              {% if archived_audience_builder.audience_builder_folder_id %}
+                  {% with folder_name=all_folders_by_id|get_value_from_dict:archived_audience_builder.audience_builder_folder_id %}
+                    <span class="wv-tag" title="Original folder">From: {{ folder_name }}</span>
+                  {% endwith %}
+              {% else %}
+                <span class="wv-tag" title="Original folder">From: Unfiled</span>
+              {% endif %}
+              {% if archived_audience_builder.subject %}<span class="wv-muted">— {{ archived_audience_builder.subject }}</span>{% endif %}
+            </div>
+            <div class="wv-actions">
+              <div class="wv-dropdown">
+                <button type="button" class="wv-kebab js-dd">•••</button>
+                <div class="wv-dropdown-menu">
+                  <button class="wv-menu-btn js-open-unarchive-audience-builder" data-audience-builder-id="{{ archived_audience_builder.id }}" data-audience-builder-name="{{ archived_audience_builder.audience_builder_name }}">Unarchive</button>
+                  <button class="wv-menu-btn js-open-delete-audience-builder" data-audience-builder-id="{{ archived_audience_builder.id }}" data-audience-builder-name="{{ archived_audience_builder.audience_builder_name }}">Delete</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        {% endfor %}
+      </div>
+    {% else %}
+      <div class="wv-muted-section">No archived Audience Builders.</div>
+    {% endif %}
+  </details>
+</div>
+
+{# ---------------- MODALS ---------------- #}
+
+{# Create Folder Modal #}
+<div id="createFolderModal" class="wv-modal-backdrop" aria-hidden="true">
+  <div class="wv-modal" role="dialog" aria-modal="true" aria-labelledby="createFolderTitle">
+    <div class="wv-modal-header">
+      <h3 class="wv-modal-title" id="createFolderTitle">Create Folder</h3>
+      <button type="button" class="btn" id="closeCreateFolder">✕</button>
+    </div>
+    <form method="post" action="{{ process_url }}">
+      {% csrf_token %}
+      <input type="hidden" name="google_civic_election_id" value="{{ google_civic_election_id }}">
+      <input type="hidden" name="state_code" value="{{ state_code }}">
+      <input type="hidden" name="action" value="create_folder">
+      <label for="audience_builder_name" style="display:block; font-weight:500; margin-bottom:6px;">Folder name</label>
+      <input class="wv-input" id="audience_builder_name" name="audience_builder_name" maxlength="255" required />
+      <div class="wv-actions-right">
+        <button type="button" class="btn" id="cancelCreate">Cancel</button>
+        <button type="submit" class="btn btn-primary">Create</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+{# Rename Folder Modal #}
+<div id="renameFolderModal" class="wv-modal-backdrop" aria-hidden="true">
+  <div class="wv-modal" role="dialog" aria-modal="true" aria-labelledby="renameFolderTitle">
+    <div class="wv-modal-header">
+      <h3 class="wv-modal-title" id="renameFolderTitle">Rename Folder</h3>
+      <button type="button" class="btn" id="closeRenameFolder">✕</button>
+    </div>
+    <form method="post" action="{{ process_url }}">
+      {% csrf_token %}
+      <input type="hidden" name="google_civic_election_id" value="{{ google_civic_election_id }}">
+      <input type="hidden" name="state_code" value="{{ state_code }}">
+      <input type="hidden" name="action" value="rename_folder">
+      <input type="hidden" name="folder_id" id="rf_folder_id">
+      <label for="rf_name" style="display:block; font-weight:500; margin-bottom:6px;">New folder name</label>
+      <input class="wv-input" id="rf_name" name="edit_audience_builder_name" maxlength="255" required />
+      <div class="wv-actions-right">
+        <button type="button" class="btn" id="cancelRenameFolder">Cancel</button>
+        <button type="submit" class="btn btn-primary">Save</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+{# Delete Folder Confirm #}
+<div id="deleteFolderModal" class="wv-modal-backdrop" aria-hidden="true">
+  <div class="wv-modal" role="dialog" aria-modal="true" aria-labelledby="deleteFolderTitle">
+    <div class="wv-modal-header">
+      <h3 class="wv-modal-title" id="deleteFolderTitle">Delete Folder</h3>
+      <button type="button" class="btn" id="closeDeleteFolder">✕</button>
+    </div>
+    <form method="post" action="{{ process_url }}">
+      {% csrf_token %}
+      <input type="hidden" name="google_civic_election_id" value="{{ google_civic_election_id }}">
+      <input type="hidden" name="state_code" value="{{ state_code }}">
+      <input type="hidden" name="action" value="delete_folder">
+      <input type="hidden" name="folder_id" id="df_folder_id">
+      <p class="wv-muted">This moves all Audience Builders to <strong>Unfiled</strong> and removes the folder.</p>
+      <div class="wv-actions-right">
+        <button type="button" class="btn" id="cancelDeleteFolder">Cancel</button>
+        <button type="submit" class="btn btn-danger">Delete</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+{# Archive / Unarchive Folder Confirm #}
+<div id="archiveFolderModal" class="wv-modal-backdrop" aria-hidden="true">
+  <div class="wv-modal" role="dialog" aria-modal="true" aria-labelledby="archiveFolderTitle">
+    <div class="wv-modal-header">
+      <h3 class="wv-modal-title" id="archiveFolderTitle">Archive Folder</h3>
+      <button type="button" class="btn" id="closeArchiveFolder">✕</button>
+    </div>
+    <form method="post" action="{{ process_url }}">
+      {% csrf_token %}
+      <input type="hidden" name="google_civic_election_id" value="{{ google_civic_election_id }}">
+      <input type="hidden" name="state_code" value="{{ state_code }}">
+      <input type="hidden" name="action" value="archive_folder">
+      <input type="hidden" name="folder_id" id="af_folder_id">
+      <p class="wv-muted">Archive this folder. You can unarchive it later.</p>
+      <div class="wv-actions-right">
+        <button type="button" class="btn" id="cancelArchiveFolder">Cancel</button>
+        <button type="submit" class="btn btn-primary">Archive</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div id="unarchiveFolderModal" class="wv-modal-backdrop" aria-hidden="true">
+  <div class="wv-modal" role="dialog" aria-modal="true" aria-labelledby="unarchiveFolderTitle">
+    <div class="wv-modal-header">
+      <h3 class="wv-modal-title" id="unarchiveFolderTitle">Unarchive Folder</h3>
+      <button type="button" class="btn" id="closeUnarchiveFolder">✕</button>
+    </div>
+    <form method="post" action="{{ process_url }}">
+      {% csrf_token %}
+      <input type="hidden" name="google_civic_election_id" value="{{ google_civic_election_id }}">
+      <input type="hidden" name="state_code" value="{{ state_code }}">
+      <input type="hidden" name="action" value="unarchive_folder">
+      <input type="hidden" name="folder_id" id="uaf_folder_id">
+      <p class="wv-muted">Return this folder to active folders.</p>
+      <div class="wv-actions-right">
+        <button type="button" class="btn" id="cancelUnarchiveFolder">Cancel</button>
+        <button type="submit" class="btn btn-primary">Unarchive</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+{# Move Audience Builder Modal #}
+<div id="moveAudienceBuilderModal" class="wv-modal-backdrop" aria-hidden="true">
+  <div class="wv-modal" role="dialog" aria-modal="true" aria-labelledby="moveAudienceBuilderTitle">
+    <div class="wv-modal-header">
+      <h3 class="wv-modal-title" id="moveAudienceBuilderTitle">Move Audience Builder to Folder</h3>
+      <button type="button" class="btn" id="closeMoveAudienceBuilder">✕</button>
+    </div>
+    <form method="post" action="{{ process_url }}">
+      {% csrf_token %}
+      <input type="hidden" name="google_civic_election_id" value="{{ google_civic_election_id }}">
+      <input type="hidden" name="state_code" value="{{ state_code }}">
+      <input type="hidden" name="action" value="change_audience_builder_folder">
+      <input type="hidden" name="audience_builder_id" id="mt_audience_builder_id">
+      <label for="new_folder_id" style="display:block; font-weight:500; margin-bottom:6px;">Destination</label>
+      <select id="new_folder_id" name="new_folder_id" class="wv-select" required>
+        <option value="null">Unfiled</option>
+        {% for f in folders_active %}
+          <option value="{{ f.id }}">{{ f.audience_builder_name }}</option>
+        {% endfor %}
+        {% for f in folders_archived %}
+          <option value="{{ f.id }}">{{ f.audience_builder_name }} (Archived)</option>
+        {% endfor %}
+      </select>
+      <div class="wv-actions-right">
+        <button type="button" class="btn" id="cancelMoveAudienceBuilder">Cancel</button>
+        <button type="submit" class="btn btn-primary">Move</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+{# Archive Audience Builder Confirm Modal #}
+<div id="archiveAudienceBuilderModal" class="wv-modal-backdrop" aria-hidden="true">
+  <div class="wv-modal" role="dialog">
+    <div class="wv-modal-header">
+      <h3 class="wv-modal-title">Archive Audience Builder</h3>
+      <button type="button" class="btn" id="closeArchiveAudienceBuilder">✕</button>
+    </div>
+    <form method="post" action="{{ process_url }}">
+      {% csrf_token %}
+      <input type="hidden" name="google_civic_election_id" value="{{ google_civic_election_id }}">
+      <input type="hidden" name="state_code" value="{{ state_code }}">
+      <input type="hidden" name="action" value="archive_audience_builder">
+      <input type="hidden" name="audience_builder_id" id="at_audience_builder_id">
+      <p class="wv-muted">Archive this Audience Builder. You can unarchive it later.</p>
+      <div class="wv-actions-right">
+        <button type="button" class="btn" id="cancelArchiveAudienceBuilder">Cancel</button>
+        <button type="submit" class="btn btn-primary">Archive</button>
+      </div>
+    </form>
+  </div>
+</div>
+{# Unarchive Audience Builder Confirm Modal#}
+<div id="unarchiveAudienceBuilderModal" class="wv-modal-backdrop" aria-hidden="true">
+  <div class="wv-modal" role="dialog">
+    <div class="wv-modal-header">
+      <h3 class="wv-modal-title">Unarchive Audience Builder</h3>
+      <button type="button" class="btn" id="closeUnarchiveAudienceBuilder">✕</button>
+    </div>
+    <form method="post" action="{{ process_url }}">
+      {% csrf_token %}
+      <input type="hidden" name="google_civic_election_id" value="{{ google_civic_election_id }}">
+      <input type="hidden" name="state_code" value="{{ state_code }}">
+      <input type="hidden" name="action" value="unarchive_audience_builder">
+      <input type="hidden" name="audience_builder_id" id="uat_audience_builder_id">
+      <p class="wv-muted">Return this Audience Builder to the active list.</p>
+      <div class="wv-actions-right">
+        <button type="button" class="btn" id="cancelUnarchiveAudienceBuilder">Cancel</button>
+        <button type="submit" class="btn btn-primary">Unarchive</button>
+      </div>
+    </form>
+  </div>
+</div>
+{# Delete Audience Builder Confirm Modal#}
+<div id="deleteAudienceBuilderModal" class="wv-modal-backdrop" aria-hidden="true">
+  <div class="wv-modal" role="dialog">
+    <div class="wv-modal-header">
+      <h3 class="wv-modal-title">Delete Audience Builder</h3>
+      <button type="button" class="btn" id="closeDeleteAudienceBuilder">✕</button>
+    </div>
+    <form method="post" action="{{ process_url }}">
+      {% csrf_token %}
+      <input type="hidden" name="google_civic_election_id" value="{{ google_civic_election_id }}">
+      <input type="hidden" name="state_code" value="{{ state_code }}">
+      <input type="hidden" name="action" value="delete_audience_builder">
+      <input type="hidden" name="audience_builder_id" id="dt_audience_builder_id">
+      <p class="wv-muted">This marks the Audience Builder as deleted and removes it from lists.</p>
+      <div class="wv-actions-right">
+        <button type="button" class="btn" id="cancelDeleteAudienceBuilder">Cancel</button>
+        <button type="submit" class="btn btn-danger">Delete</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+{# Include Saved Audiences drawer #}
+{% include 'components/_saved_audiences_drawer.html' %}
+
+<script>
+  // --- helpers ---
+  function byId(id){ return document.getElementById(id); }
+  function openModal(el){ el.classList.add('open'); el.setAttribute('aria-hidden','false'); }
+  function closeModal(el){ el.classList.remove('open'); el.setAttribute('aria-hidden','true'); }
+
+  // Dropdown toggles
+  document.querySelectorAll('.js-dd').forEach(btn=>{
+    btn.addEventListener('click', (e)=>{
+      e.stopPropagation();
+      const wrap = btn.closest('.wv-dropdown');
+      document.querySelectorAll('.wv-dropdown').forEach(d=>{ if(d!==wrap) d.classList.remove('open'); });
+      wrap.classList.toggle('open');
+    });
+  });
+  document.addEventListener('click', ()=> document.querySelectorAll('.wv-dropdown').forEach(d=>d.classList.remove('open')));
+
+  // Create Folder modal
+  const createModal = byId('createFolderModal');
+  byId('openCreateFolder').addEventListener('click', ()=>openModal(createModal));
+  byId('closeCreateFolder').addEventListener('click', ()=>closeModal(createModal));
+  byId('cancelCreate').addEventListener('click', ()=>closeModal(createModal));
+  createModal.addEventListener('click', (e)=>{ if(e.target===createModal) closeModal(createModal); });
+
+  // Rename Folder
+  const renameModal = byId('renameFolderModal');
+  document.querySelectorAll('.js-open-rename').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      byId('rf_folder_id').value = btn.dataset.folderId;
+      byId('rf_name').value = btn.dataset.folderName || '';
+      openModal(renameModal);
+    });
+  });
+  byId('closeRenameFolder').addEventListener('click', ()=>closeModal(renameModal));
+  byId('cancelRenameFolder').addEventListener('click', ()=>closeModal(renameModal));
+  renameModal.addEventListener('click', (e)=>{ if(e.target===renameModal) closeModal(renameModal); });
+
+  // Delete Folder
+  const deleteFolderModal = byId('deleteFolderModal');
+  document.querySelectorAll('.js-open-delete-folder').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      byId('df_folder_id').value = btn.dataset.folderId;
+      openModal(deleteFolderModal);
+    });
+  });
+  byId('closeDeleteFolder').addEventListener('click', ()=>closeModal(deleteFolderModal));
+  byId('cancelDeleteFolder').addEventListener('click', ()=>closeModal(deleteFolderModal));
+  deleteFolderModal.addEventListener('click', (e)=>{ if(e.target===deleteFolderModal) closeModal(deleteFolderModal); });
+
+  // Archive Folder
+  const archiveFolderModal = byId('archiveFolderModal');
+  document.querySelectorAll('.js-open-archive-folder').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      byId('af_folder_id').value = btn.dataset.folderId;
+      openModal(archiveFolderModal);
+    });
+  });
+  byId('closeArchiveFolder').addEventListener('click', ()=>closeModal(archiveFolderModal));
+  byId('cancelArchiveFolder').addEventListener('click', ()=>closeModal(archiveFolderModal));
+  archiveFolderModal.addEventListener('click', (e)=>{ if(e.target===archiveFolderModal) closeModal(archiveFolderModal); });
+
+  // Unarchive Folder
+  const unarchiveFolderModal = byId('unarchiveFolderModal');
+  document.querySelectorAll('.js-open-unarchive-folder').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      byId('uaf_folder_id').value = btn.dataset.folderId;
+      openModal(unarchiveFolderModal);
+    });
+  });
+  byId('closeUnarchiveFolder').addEventListener('click', ()=>closeModal(unarchiveFolderModal));
+  byId('cancelUnarchiveFolder').addEventListener('click', ()=>closeModal(unarchiveFolderModal));
+  unarchiveFolderModal.addEventListener('click', (e)=>{ if(e.target===unarchiveFolderModal) closeModal(unarchiveFolderModal); });
+
+  // Move Audience Builder
+  const moveAudienceBuilderModal = byId('moveAudienceBuilderModal');
+  document.querySelectorAll('.js-open-move').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      byId('mt_audience_builder_id').value = btn.dataset.audienceBuilderId;
+      // pre-select current folder if present
+      const currentId = btn.dataset.currentFolderId;
+      const sel = byId('new_folder_id');
+      [...sel.options].forEach(o=>{
+        if ((currentId === 'null' && o.value === 'null') || o.value === currentId) o.selected = true;
+      });
+
+      openModal(moveAudienceBuilderModal);
+    });
+  });
+  byId('closeMoveAudienceBuilder').addEventListener('click', ()=>closeModal(moveAudienceBuilderModal));
+  byId('cancelMoveAudienceBuilder').addEventListener('click', ()=>closeModal(moveAudienceBuilderModal));
+  moveAudienceBuilderModal.addEventListener('click', (e)=>{ if(e.target===moveAudienceBuilderModal) closeModal(moveAudienceBuilderModal); });
+
+  // Archive Audience Builder
+  const archiveAudienceBuilderModal = byId('archiveAudienceBuilderModal');
+  document.querySelectorAll('.js-open-archive-audience-builder').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      byId('at_audience_builder_id').value = btn.dataset.audienceBuilderId;
+      openModal(archiveAudienceBuilderModal);
+    });
+  });
+  byId('closeArchiveAudienceBuilder').addEventListener('click', ()=>closeModal(archiveAudienceBuilderModal));
+  byId('cancelArchiveAudienceBuilder').addEventListener('click', ()=>closeModal(archiveAudienceBuilderModal));
+  archiveAudienceBuilderModal.addEventListener('click', (e)=>{ if(e.target===archiveAudienceBuilderModal) closeModal(archiveAudienceBuilderModal); });
+
+  // Unarchive Audience Builder
+  const unarchiveAudienceBuilderModal = byId('unarchiveAudienceBuilderModal');
+  document.querySelectorAll('.js-open-unarchive-audience-builder').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      byId('uat_audience_builder_id').value = btn.dataset.audienceBuilderId;
+      openModal(unarchiveAudienceBuilderModal);
+    });
+  });
+  byId('closeUnarchiveAudienceBuilder').addEventListener('click', ()=>closeModal(unarchiveAudienceBuilderModal));
+  byId('cancelUnarchiveAudienceBuilder').addEventListener('click', ()=>closeModal(unarchiveAudienceBuilderModal));
+  unarchiveAudienceBuilderModal.addEventListener('click', (e)=>{ if(e.target===unarchiveAudienceBuilderModal) closeModal(unarchiveAudienceBuilderModal); });
+
+  // Delete Audience Builder
+  const deleteAudienceBuilderModal = byId('deleteAudienceBuilderModal');
+  document.querySelectorAll('.js-open-delete-audience-builder').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      byId('dt_audience_builder_id').value = btn.dataset.audienceBuilderId;
+      openModal(deleteAudienceBuilderModal);
+    });
+  });
+  byId('closeDeleteAudienceBuilder').addEventListener('click', ()=>closeModal(deleteAudienceBuilderModal));
+  byId('cancelDeleteAudienceBuilder').addEventListener('click', ()=>closeModal(deleteAudienceBuilderModal));
+  deleteAudienceBuilderModal.addEventListener('click', (e)=>{ if(e.target===deleteAudienceBuilderModal) closeModal(deleteAudienceBuilderModal); });
+
+  // ESC close any open modal
+  document.addEventListener('keydown', (e)=>{
+    if(e.key==='Escape'){
+      document.querySelectorAll('.wv-modal-backdrop.open').forEach(m=>closeModal(m));
+    }
+  });
+</script>
+
+{% endblock %}

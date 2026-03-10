@@ -136,10 +136,10 @@
 </div>
 
 <div class="row">
-{% if politician.we_vote_hosted_profile_image_url_large %}
 <div class="col">
 <div class="row form-group">
     
+{% if politician.we_vote_hosted_profile_image_url_large %}
     <label for="first_name_id" class="pl-3 control-label">Background Color</label>
     <div class="col">
         
@@ -149,6 +149,7 @@
         <label for="regenerate_color_id">&nbsp;Regenerate default color</label>
        {#  <label>Regenerate default color &#40;different algorithm&#41;  &nbsp;</label><input name="regenerate_color_edge_case" type="checkbox"/> #}
     </div>
+{% endif %}
     <div class="col">
         <label class="pl-4 control-label">Passkey:</label>
         <span style="font-weight: bold; font-size: 2em;">
@@ -159,7 +160,6 @@
     </div>
 </div>
 </div>
-{% endif %}
 </div>
 
 <div class="row">
@@ -547,6 +547,8 @@
 
 {% include "../form_inputs/one_form_group.html" with field_dict_1=bluesky_handle_dict %}
 
+{% include "../form_inputs/one_form_group.html" with field_dict_1=threads_handle_dict %}
+
 {% include "../form_inputs/one_form_group.html" with field_dict_1=tiktok_url_dict %}
 
 {% include "../form_inputs/three_form_groups.html" with field_dict_1=politician_email_dict field_dict_2=politician_email2_dict field_dict_3=politician_email3_dict %}
@@ -805,7 +807,25 @@
         </tr>
     {% endfor %}
     </table>
-<input name="submit_text" type="submit" value="{% if politician %}Link These Candidates to This Politician{% endif %}" />
+    <input type="hidden"
+           name="find_candidates_to_link_to_this_politician_on"
+           value="1" >
+    <input name="submit_text" type="submit" value="{% if politician %}Link These Candidates to This Politician{% endif %}" />
+    <p>&nbsp;</p>
+    <p>&nbsp;</p>
+{% else %}
+    <h4>Candidates That Might Match This Politician</h4>
+    <input id="find_candidates_to_link_to_this_politician_on_id"
+           type="hidden"
+           name="find_candidates_to_link_to_this_politician_on"
+           value="0" >
+    {% if find_candidates_to_link_none_found %}
+        <p>No candidates found to link to this politician.</p>
+    {% endif %}
+    <input name="submit_text"
+           type="submit"
+           value="{% if politician %}Find Candidates that Might Need to be Linked{% endif %}"
+           id="find_candidates_submit_btn" />
     <p>&nbsp;</p>
     <p>&nbsp;</p>
 {% endif %}
@@ -1398,13 +1418,10 @@
 {% endif %}{# End of if politician #}
 
 <script>
-    $(function() {
-        $('#state_code_id').change(function() {
-            this.form.submit();
-        });
+    document.getElementById('find_candidates_submit_btn').addEventListener('click', function() {
+        document.getElementById('find_candidates_to_link_to_this_politician_on_id').value = '1';
     });
 </script>
-
 <style>
     .animated {
         -webkit-transition: height 0.2s;

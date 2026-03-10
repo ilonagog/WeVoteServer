@@ -16,6 +16,7 @@ from django.core.validators import URLValidator
 from nameparser import HumanName
 from nameparser.config import CONSTANTS
 import wevote_functions.admin
+from config.base import get_environment_variable
 # from wevote_functions.functions_date import DATE_FORMAT_A_DBY_HMS_GMT
 CONSTANTS.string_format = "{title} {first} {middle} \"{nickname}\" {last} {suffix}"
 
@@ -1219,14 +1220,39 @@ def extract_vote_usa_measure_id(raw_vote_usa_measure_id):
 
 def extract_vote_usa_office_id(raw_vote_usa_office_id):
     if positive_value_exists(raw_vote_usa_office_id):
+        raw_vote_usa_office_id = raw_vote_usa_office_id.strip()
         if '|' in raw_vote_usa_office_id:
             parts = raw_vote_usa_office_id.split("|")
+            vote_usa_office_id = parts[1]
+        elif '}' in raw_vote_usa_office_id:
+            # A typo has been found in incoming data from Vote USA
+            parts = raw_vote_usa_office_id.split("}")
             vote_usa_office_id = parts[1]
         else:
             vote_usa_office_id = raw_vote_usa_office_id
         return vote_usa_office_id
     else:
         return ''
+
+
+def augment_vote_usa_office_id(vote_usa_office_id, primary_party=''):
+    if positive_value_exists(primary_party):
+        primary_party_suffix = ""
+        if primary_party.lower() == 'conservative party':
+            primary_party_suffix = 'PC'
+        elif primary_party.lower() == 'democratic party':
+            primary_party_suffix = 'PD'
+        elif primary_party.lower() == 'green party':
+            primary_party_suffix = 'PG'
+        elif primary_party.lower() == 'independent party':
+            primary_party_suffix = 'PI'
+        elif primary_party.lower() == 'libertarian party':
+            primary_party_suffix = 'PL'
+        elif primary_party.lower() == 'republican party':
+            primary_party_suffix = 'PR'
+        if positive_value_exists(primary_party_suffix):
+            return vote_usa_office_id + '|' + primary_party_suffix
+    return vote_usa_office_id
 
 
 def extract_website_from_url(url_string):
@@ -1797,6 +1823,32 @@ def generate_bluesky_url(input_value):
         # If it doesn't match expected patterns, return an empty string
         return ''
 
+def normalize_threads_handle(input_value):
+    if not input_value:
+        return ''
+
+    # Remove leading/trailing whitespace and convert to lowercase
+    input_value = input_value.strip().lower()
+
+    # Regular expression to match Threads usernames
+    username_pattern = r'^@?[\w.]+$'
+
+    # Regular expression to match Threads URLs
+    url_pattern = r'^(https?://)?(www\.)?(threads\.com/)?(@[\w.]+)/?$'
+
+    if re.match(username_pattern, input_value):
+        # If it's just a username (with or without @), convert to full URL
+        username = input_value.lstrip('@')
+        return f'https://www.threads.com/@{username}'
+    elif re.match(url_pattern, input_value):
+        # If it's already a URL, ensure it's in the correct format
+        match = re.match(url_pattern, input_value)
+        username = match.group(4)
+        return f'https://www.threads.com/{username}'
+    else:
+        # If it doesn't match expected patterns, return an empty string
+        return ''
+
 def normalize_tiktok_url(input_value):
     if not input_value:
         return ''
@@ -2063,3 +2115,9 @@ def strip_html_tags(value):
         return django.utils.html.strip_tags(value)
     else:
         return ""
+
+
+def server_is_source_of_truth():
+    # If 'SERVER_IS_SOURCE_OF_TRUTH' is not False
+    # then the default value has been modified in the environment_variables.json file.
+    return get_environment_variable('SERVER_IS_SOURCE_OF_TRUTH') is not False

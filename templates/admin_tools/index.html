@@ -171,8 +171,11 @@
     <p><a href="{% url 'admin_tools:sync_dashboard' %}">Fast Load (or Sync) Data with Master We Vote Servers</a></p>
     <p><a href="{% url 'import_export_batches:batch_process_list' %}?google_civic_election_id={{ google_civic_election_id }}&state_code={{ state_code }}"
         >Batch Process Status List</a></p>
-    <p><a href="{% url 'voter:voter_list' %}">Voters</a></p>
+    <p><a href="{% url 'voter:voter_list' %}">Voters</a>&nbsp;&nbsp; |&nbsp;&nbsp;
+    <a href="{% url 'import_export_batches:batch_list' %}?kind_of_batch=IMPORT_VOTER&google_civic_election_id={{ google_civic_election_id }}&state_code={{ state_code }}">
+    Export Voters</a></p>
     <p><a href="{% url 'admin_tools:data_cleanup' %}">Data Cleanup Routines</a></p>
+    <p><a href="{% url 'import_export_jira:jira_import_elections' %}">JIRA Import Tool</a></p>
     <p><a href="{% url 'import_export_batches:batches_home' %}?google_civic_election_id={{ google_civic_election_id }}&state_code={{ state_code }}"
         >Import Data in Batches</a></p>
     <p><a href="{% url 'googlebot_site_map:googlebot_site_map_list_view' %}">Googlebot Site Map Stats</a></p>
@@ -210,6 +213,10 @@
                 <a id="gitLink" href={{git_commit_hash_url}} target="_blank">{{git_commit_hash}}</a>
                 <span style="padding-left: 40px;">({{git_commit_date}})</span>
             </td>
+        </tr>
+        <tr>
+            <td>SERVER_IS_SOURCE_OF_TRUTH:&nbsp;&nbsp;</td>
+            <td>{{ SERVER_IS_SOURCE_OF_TRUTH }}</td>
         </tr>
      </table>
 </p>

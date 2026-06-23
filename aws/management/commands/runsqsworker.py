@@ -4,7 +4,7 @@ import os
 from django.core.management.base import BaseCommand
 
 import wevote_functions.admin
-from config.base import get_environment_variable
+from config.environment_variable_functions import get_environment_variable
 
 logger = wevote_functions.admin.get_logger(__name__)
 
@@ -76,14 +76,7 @@ def process_request(function, body, message):
 
 
 def worker_run(queue_url):
-    if queue_url.startswith('http://localhost'):
-        try:
-            import localstack_client.session as boto3
-        except:
-            import boto3
-    else:
-        import boto3
-
+    import boto3
     sqs = boto3.client('sqs')
     # print("sqs.receive_message startup--------------------")
 

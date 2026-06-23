@@ -28,7 +28,7 @@ from candidate.models import CandidateCampaign, CandidateListManager, CandidateM
     KIND_OF_LOG_ENTRY_ANALYSIS_COMMENT, KIND_OF_LOG_ENTRY_LINK_ADDED, PROFILE_IMAGE_TYPE_BALLOTPEDIA, \
     PROFILE_IMAGE_TYPE_FACEBOOK, PROFILE_IMAGE_TYPE_TWITTER, PROFILE_IMAGE_TYPE_UNKNOWN, \
     PROFILE_IMAGE_TYPE_UPLOADED, PROFILE_IMAGE_TYPE_VOTE_USA, PROFILE_IMAGE_TYPE_WIKIPEDIA
-from config.base import get_environment_variable
+from config.environment_variable_functions import get_environment_variable
 from election.models import Election
 from exception.models import handle_record_found_more_than_one_exception, \
     handle_record_not_found_exception, handle_record_not_saved_exception, print_to_log
@@ -46,6 +46,7 @@ from volunteer_task.models import VOLUNTEER_ACTION_DUPLICATE_POLITICIAN_ANALYSIS
     VOLUNTEER_ACTION_POLITICIAN_DEDUPLICATION, VolunteerTaskManager
 from voter.models import fetch_voter_from_voter_device_link, voter_has_authority, VoterManager
 from wevote_functions import functions_test_links
+from wevote_functions.create_trigram_index import create_trigram_index
 from wevote_functions.functions import convert_to_int, convert_to_political_party_constant, \
     extract_first_name_from_full_name, extract_instagram_handle_from_text_string, \
     extract_middle_name_from_full_name, extract_last_name_from_full_name, \
@@ -61,6 +62,7 @@ from .controllers import add_alternate_names_to_next_spot, add_twitter_handle_to
     generate_campaignx_for_politician, politician_save_photo_from_file_reader, \
     update_politician_details_from_candidate, \
     merge_these_two_politicians, politicians_import_from_master_server
+from .controllers_data_cleaning import calculate_if_is_claimed_profile
 from .models import Politician, PoliticianChangeLog, PoliticianManager, POLITICIAN_UNIQUE_ATTRIBUTES_TO_BE_CLEARED, \
     POLITICIAN_UNIQUE_IDENTIFIERS, PoliticiansArePossibleDuplicates, POLITICAL_DATA_MANAGER, UNKNOWN, \
     RecommendedPoliticianLinkByPolitician
@@ -89,7 +91,7 @@ def politician_url_test_view(request):
     except Politician.MultipleObjectsReturned as e:
         handle_record_found_more_than_one_exception(e, logger=logger)
         messages.add_message(request, messages.ERROR, "Multiple records found for this politician.")
-        return HttpResponseRedirect(reverse('politician:politician_list'))  # Redirect to a list page
+        return HttpResponseRedirect(reverse('politician:politicians_data_cleaning'))  # Redirect to a list page
     except Politician.DoesNotExist:
         messages.add_message(request, messages.ERROR, "Politician not found.")
         return HttpResponseRedirect(
@@ -97,7 +99,7 @@ def politician_url_test_view(request):
         )
     except Exception as e:
         messages.add_message(request, messages.ERROR, f"Unexpected error: {str(e)}")
-        return HttpResponseRedirect(reverse('politician:politician_list'))
+        return HttpResponseRedirect(reverse('politician:politicians_data_cleaning'))
     
     # Collect all URLs that exist
     urls_to_test = []
@@ -377,7 +379,7 @@ def match_politicians_to_organizations_view(request):
                             str(politician_we_vote_id_update_list) + " "
     messages.add_message(request, messages.INFO, message_to_print)
 
-    return HttpResponseRedirect(reverse('politician:politician_list', args=()) +
+    return HttpResponseRedirect(reverse('politician:politicians_data_cleaning', args=()) +
                                 "?state_code={state_code}"
                                 "".format(state_code=state_code))
 
@@ -1488,6 +1490,7 @@ def politician_edit_view(request, politician_id=0, politician_we_vote_id=''):
     politician_url5 = request.GET.get('politician_url5', False)
     political_party = request.GET.get('political_party', False)
     state_code = request.GET.get('state_code', False)
+    use_trigram_match = positive_value_exists(request.GET.get('use_trigram_match', False))
     vote_smart_id = request.GET.get('vote_smart_id', False)
     vote_usa_politician_id = request.GET.get('vote_usa_politician_id', False)
     youtube_url = request.GET.get('youtube_url', False)
@@ -1711,21 +1714,28 @@ def politician_edit_view(request, politician_id=0, politician_we_vote_id=''):
         # ##################################
         # Find Candidates to Link to this Politician
         # Finding Candidates that *might* be "children" of this politician
-        t0 = time()
+
         # find_candidates_to_link_to_this_politician_on = False  # Turned off for now because this is a slow operation
         # TODO: Connect this to a variable on the Politician Edit page that turns this on.
         find_candidates_to_link_none_found = False
         related_candidate_list = []
         if positive_value_exists(find_candidates_to_link_to_this_politician_on):
+            t1 = time()
             from politician.controllers import find_candidates_to_link_to_this_politician
-            related_candidate_list = find_candidates_to_link_to_this_politician(politician=politician_on_stage)
+            related_candidate_list = find_candidates_to_link_to_this_politician(politician=politician_on_stage,use_trigram_match=use_trigram_match)
             if len(related_candidate_list) == 0:
                 find_candidates_to_link_to_this_politician_on = False
                 find_candidates_to_link_none_found = True
             else:
                 find_candidates_to_link_none_found = False
+            performance_list.append({
+            'enum_key': 'RET_CANDIDATES_MATCH',
+            'time_difference': round(time() - t1, 4),
+            })
+
 
         # Find possible duplicate politicians
+        t0 = time()
         duplicate_politician_list = []
         if positive_value_exists(politician_on_stage.politician_name) or \
                 positive_value_exists(politician_on_stage.first_name) or \
@@ -1825,11 +1835,10 @@ def politician_edit_view(request, politician_id=0, politician_we_vote_id=''):
             except ObjectDoesNotExist:
                 # This is fine, create new
                 pass
-
-        performance_list.append({
+            performance_list.append({
             'enum_key': 'RET_DUPLICATE_POLITICIANS',
             'time_difference': round(time() - t0, 4),
-        })
+            })
 
         # ##################################
         # Find Representatives Linked to this Politician
@@ -2142,6 +2151,7 @@ def politician_edit_view(request, politician_id=0, politician_we_vote_id=''):
             'related_campaignx_list':       related_campaignx_list,
             'related_candidate_list':       related_candidate_list,
             'related_representative_list':  related_representative_list,
+            'use_trigram_match':            use_trigram_match,
             'state_code':                   state_code,
             'state_code_dict':
             {
@@ -2417,7 +2427,7 @@ def politician_edit_process_view(request):
     middle_name = request.POST.get('middle_name', False)
     last_name = request.POST.get('last_name', False)
     profile_image_background_color = request.POST.get('profile_image_background_color', False)
-    regenerate_color = request.POST.get('regenerate_color', False)
+    regenerate_color = positive_value_exists(request.POST.get('regenerate_color', False))
     facebook_url = request.POST.get('facebook_url', False)
     facebook_url2 = request.POST.get('facebook_url2', False)
     facebook_url3 = request.POST.get('facebook_url3', False)
@@ -2439,7 +2449,7 @@ def politician_edit_process_view(request):
     maplight_id = request.POST.get('maplight_id', False)
     politician_analysis_comment = request.POST.get('politician_analysis_comment', '')
     if positive_value_exists(politician_analysis_comment):
-        change_description += "ANALYSIS_COMMENT: " + politician_analysis_comment + " "
+        change_description += "ADDED [Politician Analysis]: " + politician_analysis_comment + " "
         change_description_changed = True
     politician_analysis_done = positive_value_exists(request.POST.get('politician_analysis_done', False))
     politician_email = request.POST.get('politician_email', False)
@@ -2700,7 +2710,7 @@ def politician_edit_process_view(request):
                                          "Error converting politician photo to binary: {error}".format(error=e))
             if politician_photo_file_found and politician_photo_converted_to_binary:
                 changes_found_dict['is_photo_added'] = True
-                change_description += "Photo ADDED "
+                change_description += "ADDED [Photo] "
                 change_description_changed = True
                 photo_results = politician_save_photo_from_file_reader(
                     politician_we_vote_id=politician_we_vote_id,
@@ -2732,7 +2742,7 @@ def politician_edit_process_view(request):
                         politician_on_stage.profile_image_type_currently_active = profile_image_type_currently_active
             elif politician_photo_file_delete:
                 changes_found_dict['is_photo_removed'] = True
-                change_description += "Photo REMOVED "
+                change_description += "CLEARED [Photo] "
                 change_description_changed = True
 
                 politician_on_stage.we_vote_hosted_profile_uploaded_image_url_large = None
@@ -2745,6 +2755,7 @@ def politician_edit_process_view(request):
                     politician_on_stage.we_vote_hosted_profile_image_url_large = None
                     politician_on_stage.we_vote_hosted_profile_image_url_medium = None
                     politician_on_stage.we_vote_hosted_profile_image_url_tiny = None
+                    politician_on_stage.profile_image_background_color_needed = True
             if profile_image_type_currently_active is not False:
                 results = organize_object_photo_fields_based_on_image_type_currently_active(
                     object_with_photo_fields=politician_on_stage,
@@ -2753,7 +2764,7 @@ def politician_edit_process_view(request):
                 if results['success']:
                     politician_on_stage = results['object_with_photo_fields']
                     if results['profile_image_default_updated']:
-                        regenerate_color = True
+                        politician_on_stage.profile_image_background_color_needed = True
                         # politician_on_stage.profile_image_background_color = generate_background(politician_on_stage)
                         # politician_on_stage.profile_image_background_color_needed = False
 
@@ -2809,6 +2820,7 @@ def politician_edit_process_view(request):
                         politician_on_stage.we_vote_hosted_profile_image_url_large = None
                         politician_on_stage.we_vote_hosted_profile_image_url_medium = None
                         politician_on_stage.we_vote_hosted_profile_image_url_tiny = None
+                        politician_on_stage.profile_image_background_color_needed = True
                         results = organize_object_photo_fields_based_on_image_type_currently_active(
                             object_with_photo_fields=politician_on_stage)
                         if results['success']:
@@ -2885,10 +2897,8 @@ def politician_edit_process_view(request):
             elif profile_image_background_color is not False:
                 if profile_image_background_color == '':
                     politician_on_stage.profile_image_background_color = None
-                    politician_on_stage.profile_image_background_color_needed = False
                 elif validate_hex(profile_image_background_color):
                     politician_on_stage.profile_image_background_color = profile_image_background_color
-                    politician_on_stage.profile_image_background_color_needed = False
                 else:
                     messages.add_message(request, messages.ERROR,
                                          'Enter hex as \'#\' followed by six hexadecimal characters 0-9a-f')
@@ -3341,8 +3351,13 @@ def politician_edit_process_view(request):
             })
 
             # #################################################
+            if not politician_on_stage.is_claimed_profile:
+                results = calculate_if_is_claimed_profile(politician=politician_on_stage)
+                if results['success']:
+                    politician_on_stage = results['politician']
+
+            # #################################################
             t0 = time()
-            # Save politician object
             politician_on_stage.save()
             politician_we_vote_id = politician_on_stage.we_vote_id
             vote_usa_politician_id = politician_on_stage.vote_usa_politician_id
@@ -3358,7 +3373,19 @@ def politician_edit_process_view(request):
             t0 = time()
             update_ballotpedia_politician_url = ballotpedia_politician_url_changed or \
                 not positive_value_exists(politician_on_stage.ballotpedia_photo_url)
-            if update_ballotpedia_politician_url and positive_value_exists(ballotpedia_politician_url):
+            
+            is_valid_photo = (
+                    not politician_on_stage.ballotpedia_photo_url_is_broken
+                    and not politician_on_stage.ballotpedia_photo_url_is_placeholder)
+            
+            fetch_photo_url = (
+                positive_value_exists(ballotpedia_politician_url)
+                and (
+                    ballotpedia_politician_url_changed
+                    or (update_ballotpedia_politician_url and is_valid_photo)
+                )
+            )
+            if fetch_photo_url:
                 results = get_photo_url_from_ballotpedia(
                     incoming_object=politician_on_stage,
                     save_to_database=True,
@@ -3471,6 +3498,8 @@ def politician_edit_process_view(request):
     except Exception as e:
         messages.add_message(request, messages.ERROR, 'LINKED_CANDIDATE_PROBLEM: ' + str(e))
         linked_candidate_list = []
+    candidates_to_update = []
+    total_positions_changed = 0
     for candidate in linked_candidate_list:
         if positive_value_exists(candidate.id):
             variable_name = "unlink_candidate_" + str(candidate.id) + "_from_politician"
@@ -3479,18 +3508,33 @@ def politician_edit_process_view(request):
                 candidate.politician_we_vote_id = None
                 candidate.politician_id = None
                 candidate.seo_friendly_path = None
-                candidate.save()
-                # Now update positions
+
+                # Add to list for bulk saving later
+                candidates_to_update.append(candidate)
+
+                # Update positions (Internal logic usually requires individual processing)
                 results = position_list_manager.update_politician_we_vote_id_in_all_positions(
                     candidate_we_vote_id=candidate.we_vote_id,
                     new_politician_id=None,
                     new_politician_we_vote_id=None)
 
-                messages.add_message(request, messages.INFO,
-                                     'Candidate unlinked, number of positions changed: {number_changed}'
-                                     ''.format(number_changed=results['number_changed']))
-            else:
-                pass
+                if 'number_changed' in results:
+                    total_positions_changed += results['number_changed']
+
+    # Perform the bulk save
+    if candidates_to_update:
+        try:
+            CandidateCampaign.objects.bulk_update(
+                candidates_to_update,
+                ['politician_we_vote_id', 'politician_id', 'seo_friendly_path']
+            )
+            messages.add_message(
+                request, messages.INFO,
+                'Unlinked {count} candidate(s). Total positions updated: {total}'
+                ''.format(count=len(candidates_to_update), total=total_positions_changed)
+            )
+        except Exception as e:
+            messages.add_message(request, messages.ERROR, 'BULK_CANDIDATE_UNLINK_FAILED: ' + str(e))
 
     performance_list.append({
         'enum_key': 'UNLNK_CANDIDATES',
@@ -3510,19 +3554,34 @@ def politician_edit_process_view(request):
     except Exception as e:
         messages.add_message(request, messages.ERROR, 'LINKED_REPRESENTATIVE_PROBLEM: ' + str(e))
         linked_representative_list = []
+    representatives_to_update = []
+    # Create a list to hold objects destined for the bulk update
     for representative in linked_representative_list:
         if positive_value_exists(representative.id):
             variable_name = "unlink_representative_" + str(representative.id) + "_from_politician"
             unlink_representative = positive_value_exists(request.POST.get(variable_name, False))
             if positive_value_exists(unlink_representative) and positive_value_exists(politician_we_vote_id):
+                # Modify the object attributes in memory
                 representative.politician_we_vote_id = None
                 representative.politician_id = None
                 representative.seo_friendly_path = None
-                representative.save()
 
-                messages.add_message(request, messages.INFO, 'Representative unlinked.')
-            else:
-                pass
+                # Add to our update list instead of calling .save()
+                representatives_to_update.append(representative)
+
+    # Perform the single database call for all modified representatives
+    if representatives_to_update:
+        try:
+            Representative.objects.bulk_update(
+                representatives_to_update,
+                ['politician_we_vote_id', 'politician_id', 'seo_friendly_path']
+            )
+            messages.add_message(
+                request, messages.INFO,
+                f'{len(representatives_to_update)} Representative(s) unlinked.'
+            )
+        except Exception as e:
+            messages.add_message(request, messages.ERROR, 'BULK_UNLINK_REPRESENTATIVE_PROBLEM: ' + str(e))
 
     performance_list.append({
         'enum_key': 'UNLNK_REPS',
@@ -3549,6 +3608,8 @@ def politician_edit_process_view(request):
     # ##################################
     # Link Candidates to this Politician
     t0 = time()
+    candidates_to_update = []
+    total_positions_changed = 0
     # Transaction ensures all candidate saves and position_list_manager updates are committed together
     with transaction.atomic():
         for candidate in related_candidate_list:
@@ -3560,20 +3621,38 @@ def politician_edit_process_view(request):
                     candidate.politician_we_vote_id = politician_we_vote_id
                     candidate.seo_friendly_path = politician_on_stage.seo_friendly_path
                     if not positive_value_exists(candidate.vote_usa_politician_id) and \
-                            positive_value_exists(vote_usa_politician_id):
+                        positive_value_exists(vote_usa_politician_id):
                         candidate.vote_usa_politician_id = vote_usa_politician_id
-                    candidate.save()
+
+                    # Add to bulk list instead of individual .save()
+                    candidates_to_update.append(candidate)
+
                     # Now update positions
                     results = position_list_manager.update_politician_we_vote_id_in_all_positions(
                         candidate_we_vote_id=candidate.we_vote_id,
                         new_politician_id=politician_id,
                         new_politician_we_vote_id=politician_we_vote_id)
 
-                    messages.add_message(request, messages.INFO,
-                                         'Candidate linked, number of positions changed: {number_changed}'
-                                         ''.format(number_changed=results['number_changed']))
+                    if 'number_changed' in results:
+                        total_positions_changed += results['number_changed']
                 else:
                     pass
+
+        # Perform the single bulk update for all linked candidates
+        if candidates_to_update:
+            fields_to_update = [
+                'politician_id',
+                'politician_we_vote_id',
+                'seo_friendly_path',
+                'vote_usa_politician_id'
+            ]
+            CandidateCampaign.objects.bulk_update(candidates_to_update, fields_to_update)
+
+            messages.add_message(
+                request, messages.INFO,
+                'Linked {count} candidate(s). Total positions updated: {total}'
+                ''.format(count=len(candidates_to_update), total=total_positions_changed)
+            )
 
     performance_list.append({
         'enum_key': 'LINK_CANDIDATES',
@@ -3595,6 +3674,7 @@ def politician_edit_process_view(request):
     # ##################################
     # Link Representatives to this Politician
     t0 = time()
+    representatives_to_update = []
     for representative in related_representative_list:
         if positive_value_exists(representative.id):
             variable_name = "link_representative_" + str(representative.id) + "_to_politician"
@@ -3604,9 +3684,29 @@ def politician_edit_process_view(request):
                 representative.politician_we_vote_id = politician_we_vote_id
                 representative.seo_friendly_path = politician_on_stage.seo_friendly_path
                 if not positive_value_exists(representative.vote_usa_politician_id) and \
-                        positive_value_exists(vote_usa_politician_id):
+                    positive_value_exists(vote_usa_politician_id):
                     representative.vote_usa_politician_id = vote_usa_politician_id
-                representative.save()
+
+                # Add to list for bulk update instead of saving now
+                representatives_to_update.append(representative)
+
+    # Perform the bulk save
+    if representatives_to_update:
+        try:
+            fields_to_update = [
+                'politician_id',
+                'politician_we_vote_id',
+                'seo_friendly_path',
+                'vote_usa_politician_id'
+            ]
+            Representative.objects.bulk_update(representatives_to_update, fields_to_update)
+
+            messages.add_message(
+                request, messages.INFO,
+                'Linked {count} representative(s).'.format(count=len(representatives_to_update))
+            )
+        except Exception as e:
+            messages.add_message(request, messages.ERROR, 'BULK_REPRESENTATIVE_LINK_FAILED: ' + str(e))
     
     performance_list.append({
         'enum_key': 'LINK_REPS',
@@ -4282,7 +4382,7 @@ def repair_ocd_id_mismatch_damage_view(request):
                              states_to_be_fixed_count=states_to_be_fixed_count,
                              status=status))
 
-    return HttpResponseRedirect(reverse('politician:politician_list', args=()) +
+    return HttpResponseRedirect(reverse('politician:politicians_data_cleaning', args=()) +
                                 "?google_civic_election_id={google_civic_election_id}"
                                 "&state_code={state_code}"
                                 "&show_ocd_id_state_mismatch=1"
@@ -4299,7 +4399,7 @@ def update_politician_from_candidate_view(request):
     if not positive_value_exists(politician_id) and not positive_value_exists(politician_we_vote_id):
         message = "Unable to update politician from candidate. Missing politician_id and we_vote_id."
         messages.add_message(request, messages.INFO, message)
-        return HttpResponseRedirect(reverse('politician:politician_list', args=()))
+        return HttpResponseRedirect(reverse('politician:politicians_data_cleaning', args=()))
 
     if positive_value_exists(politician_we_vote_id):
         politician = Politician.objects.get(we_vote_id=politician_we_vote_id)
@@ -4425,7 +4525,7 @@ def update_politicians_from_candidates_view(request):
 
     messages.add_message(request, messages.INFO, message)
 
-    return HttpResponseRedirect(reverse('politician:politician_list', args=()) +
+    return HttpResponseRedirect(reverse('politician:politicians_data_cleaning', args=()) +
                                 "?state_code={state_code}"
                                 "".format(
                                     state_code=state_code))
@@ -4466,7 +4566,7 @@ def update_politician_ultimate_election_date_from_candidates_view(request):
 
     messages.add_message(request, messages.INFO, message)
 
-    return HttpResponseRedirect(reverse('politician:politician_list', args=()) +
+    return HttpResponseRedirect(reverse('politician:politicians_data_cleaning', args=()) +
                                 "?state_code={state_code}"
                                 "".format(
                                     state_code=state_code))
@@ -4584,7 +4684,7 @@ def update_profile_image_background_color_view_for_politicians(request):
         else:
             messages.add_message(request, messages.ERROR, results['status'])
 
-    return HttpResponseRedirect(reverse('politician:politician_list', args=()))
+    return HttpResponseRedirect(reverse('politician:politicians_data_cleaning', args=()))
 
 
 def update_recommended_politicians_view(request):
@@ -4628,3 +4728,45 @@ def update_recommended_politicians_view(request):
     return HttpResponseRedirect(reverse('politician:politician_list', args=()) +
                                 "?state_code={state_code}"
                                 "".format(state_code=state_code))
+
+@login_required
+def create_trigram_gist_idx_view(request):
+    """
+    Create a trigram index on the Politician table to speed up searches.
+    """
+    authority_required = {'admin'}
+    if not voter_has_authority(request, authority_required):
+        return redirect_to_sign_in_page(request, authority_required)
+
+    status_message = None
+    status_type = None
+    indexes_created = []
+    indexes_already_existed = []
+
+    try:
+        # In the future, we might want to allow the user to specify the model and fields
+       if request.method == "POST":
+            # field value coming from form input
+            field_name = request.POST.get("index_field")
+            model = Politician
+            fields = [field_name] if field_name else []
+
+            if not fields:
+                raise Exception("No field provided for index creation.")
+            results = create_trigram_index(model, fields)
+        
+            status_message = results['status']
+            status_type = results.get('status_level', 'error' if not results['success'] else 'success')
+            indexes_created = results.get('indexes_created', [])
+            indexes_already_existed = results.get('indexes_already_existed', [])
+    except Exception as e:
+        status_message = f"Failed to create trigram index: {e}"
+        status_type = "error"
+
+    template_variables = {
+        'status_message': status_message,
+        'status_type': status_type,
+        'indexes_created': indexes_created,
+        'indexes_already_existed': indexes_already_existed,
+    }
+    return render(request, 'politician/create_trigram_gist_idx.html', template_variables)

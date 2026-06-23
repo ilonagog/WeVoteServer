@@ -8,7 +8,7 @@ from django.db.models import Q
 
 from candidate.models import PROFILE_IMAGE_TYPE_FACEBOOK, PROFILE_IMAGE_TYPE_TWITTER, PROFILE_IMAGE_TYPE_UNKNOWN, \
     PROFILE_IMAGE_TYPE_UPLOADED, PROFILE_IMAGE_TYPE_VOTE_USA, PROFILE_IMAGE_TYPE_CURRENTLY_ACTIVE_CHOICES
-from config.base import get_environment_variable
+from config.environment_variable_functions import get_environment_variable
 from exception.models import handle_exception, \
     handle_record_found_more_than_one_exception, handle_record_not_saved_exception, handle_record_not_found_exception
 from import_export_facebook.models import FacebookManager
@@ -3784,6 +3784,7 @@ class OrganizationsArePossibleDuplicates(models.Model):
             # If the we_vote_id passed in wasn't found, don't return another we_vote_id
             return ""
 
+
 class OrganizationChangeLog(models.Model):  # OrganizationLogEntry would be another name
     """
     What changes were made, and by whom?
@@ -3808,9 +3809,18 @@ class OrganizationChangeLog(models.Model):  # OrganizationLogEntry would be anot
                         we_vote_id,
                         "{issue_name}".format(issue_name=issue_name))
             change_description_augmented = change_description_augmented\
+                .replace("ADDED", "<span style=\'color: #A9A9A9;\'>ADDED</span><br />")
+            change_description_augmented = change_description_augmented\
                 .replace("ADD", "<span style=\'color: #A9A9A9;\'>ADDED</span><br />")
             change_description_augmented = change_description_augmented\
+                .replace("CLEARED", "<span style=\'color: #A9A9A9;\'>CLEARED</span><br />")
+            # REMOVED code is here for backwards compatibility
+            change_description_augmented = change_description_augmented\
+                .replace("REMOVED", "<span style=\'color: #A9A9A9;\'>REMOVED</span><br />")
+            change_description_augmented = change_description_augmented\
                 .replace("REMOVE", "<span style=\'color: #A9A9A9;\'>REMOVED</span><br />")
+            change_description_augmented = change_description_augmented\
+                .replace("REPLACED", "<span style=\'color: #A9A9A9;\'>REPLACED</span><br />")
             return change_description_augmented
         else:
             return ''

@@ -11,7 +11,7 @@ from ballot.models import BallotItem, BallotItemListManager, \
     VoterBallotSaved, VoterBallotSavedManager
 from candidate.models import CandidateCampaign, CandidateListManager, CandidateManager, \
     CandidateToOfficeLink
-from config.base import get_environment_variable
+from config.environment_variable_functions import get_environment_variable
 import copy
 from datetime import datetime, timedelta
 from django.http import HttpResponseRedirect
@@ -1234,12 +1234,15 @@ def election_list_view(request):
 
     try:
         from import_export_vote_usa.controllers import VOTE_USA_ELECTION_QUERY_URL
-        VOTE_USA_API_KEY = get_environment_variable("VOTE_USA_API_KEY", no_exception=True)
+        vote_usa_api_key = get_environment_variable("VOTE_USA_API_KEY", no_exception=True)
+        include_pre_release_elections = 'Y'
         vote_usa_elections_api_url = \
-            "{url}?accessKey={accessKey}" \
+            "{url}?accessKey={accessKey}&preRelease={preRelease}&seeAll={seeAll}" \
             "".format(
+                accessKey=vote_usa_api_key,
+                preRelease=include_pre_release_elections,
+                seeAll=include_pre_release_elections,
                 url=VOTE_USA_ELECTION_QUERY_URL,
-                accessKey=VOTE_USA_API_KEY,
             )
     except Exception as e:
         vote_usa_elections_api_url = "FAILED: " + str(e) + " "
